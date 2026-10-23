@@ -95,6 +95,7 @@ public sealed class ClipboardWatcher : IDisposable
 
             var path = Inbox.NewCapturePath();
             Thumbnails.SavePng(image, path);
+            CaptureSession.Own(path);
             Log.Notice($"Caught a clipboard capture: {Path.GetFileName(path)}");
             _onCapture(path, image.PixelWidth, image.PixelHeight);
         }

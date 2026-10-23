@@ -18,11 +18,12 @@ namespace Snapline.UI;
 /// </summary>
 public sealed class PeggedControl : Canvas
 {
+    internal static bool OptimizedRendering { get; set; } = true;
     public Pegged Item { get; }
     private readonly Line _line;
 
     // Motion
-    private readonly Spring _swing = Spring.Raw(46, 2.6);                       // degrees
+    private readonly Spring _swing = Spring.Raw(55, 4.8);                       // small, quicker settling sway
     private readonly Spring _arrive = Spring.FromResponse(0.42, 0.72, -46);     // y offset while dropping in
     private readonly Spring _hoverScale = Spring.FromResponse(0.3, 0.6, 1);
     private readonly Tween _pressScale = new(1);
@@ -38,6 +39,7 @@ public sealed class PeggedControl : Canvas
     // Visuals
     private readonly RotateTransform _rotate = new();
     private readonly TranslateTransform _drop = new();
+    private readonly TranslateTransform _position = new();
     private readonly ScaleTransform _cardScale = new();
     private readonly Grid _cardHost;
     private readonly Border _frame;
@@ -48,6 +50,7 @@ public sealed class PeggedControl : Canvas
     private readonly TranslateTransform _copiedTranslate = new();
     private readonly DropShadowEffect _shadowEffect;
     private Grid _pin = null!;
+    private bool? _paintedPinned;
     private bool _reordering;
     private double _grabOffsetX;
     private Point _downInCanvas;
@@ -81,7 +84,10 @@ public sealed class PeggedControl : Canvas
         var group = new TransformGroup();
         group.Children.Add(_rotate);
         group.Children.Add(_drop);
+        group.Children.Add(_position);
         RenderTransform = group;
+        SetLeft(this,0);
+        Loaded+=(_,_)=>CacheMode=OptimizedRendering ? new BitmapCache {RenderAtScale=VisualTreeHelper.GetDpi(this).DpiScaleX*1.04} : null;
         _rotate.CenterX = Layout.CardWidth / 2;
         _rotate.CenterY = 0;
 
@@ -250,7 +256,7 @@ public sealed class PeggedControl : Canvas
     }
 
     /// <summary>The thumbnail changed, for example after an edit.</summary>
-    public void Refresh()
+    public void Refresh(bool nudge=true)
     {
         _image.Source = Item.Thumb;
         PaintPin();
@@ -264,7 +270,7 @@ public sealed class PeggedControl : Canvas
             PlaceCopied();
         }
         ApplyPhotoClip();
-        if (!Item.Flying) Nudge(2.2);
+        if (nudge && !Item.Flying) Nudge(2.2);
     }
 
     /// <summary>A stable number for this photo, so a mixed peg keeps its colour.</summary>
@@ -272,6 +278,8 @@ public sealed class PeggedControl : Canvas
 
     private void PaintPin()
     {
+        if(_pin is not null && _paintedPinned==Item.Pinned) return;
+        _paintedPinned=Item.Pinned;
         if (_pin is not null) Children.Remove(_pin);
         _pin = Pegs.Create(seed: Seed, pinned: Item.Pinned);
         Children.Add(_pin);
@@ -316,7 +324,7 @@ public sealed class PeggedControl : Canvas
             double scale = _cardScale.ScaleX;
             double w = _cardSize.Width * scale, h = _cardSize.Height * scale;
             double x = _x.Value - w / 2;
-            double y = top + Layout.CardOffsetBelowTop + _drop.Y;
+            double y = top + _position.Y + Layout.CardOffsetBelowTop + _drop.Y;
             return new Rect(x, y, w, h);
         }
     }
@@ -342,8 +350,16 @@ public sealed class PeggedControl : Canvas
     /// <summary>Landing after the flight: no jump, just a small sway from rest.</summary>
     public void Land()
     {
-        _opacity.Go(1, 0.16, Ease.OutQuad);
+        // Already covered by the opaque final GPU frame; make the real card
+        // ready before that frame fades, without a dim/transparent handoff.
+        _opacity.Snap(1);
         Nudge(2.2);
+    }
+    internal void SettleForSlide()
+    {
+        _swing.Snap(0);_arrive.Snap(0);_x.Snap(_x.Target);
+        _opacity.Snap(Item.Flying?0:1);_hoverScale.Snap(_hovering?1.035:1);
+        Tick(0);
     }
 
     public void Breeze(bool now = false)
@@ -401,12 +417,13 @@ public sealed class PeggedControl : Canvas
         _opacity.Step(dt); _cardOpacity.Step(dt); _crossOpacity.Step(dt); _crossScale.Step(dt);
         _copiedOpacity.Step(dt); _copiedOffset.Step(dt); _shadow.Step(dt);
 
-        SetLeft(this, _x.Value - Layout.CardWidth / 2);
+        if(OptimizedRendering) _position.X = _x.Value - Layout.CardWidth / 2;
+        else SetLeft(this,_x.Value - Layout.CardWidth / 2);
         if (RopeYAt is not null)
         {
             double ropeY = RopeYAt(_x.Value);
-            SetTop(this, ropeY - Layout.PinAbove);
-            Height = Layout.PanelHeight - ropeY;
+            if(OptimizedRendering) _position.Y = ropeY - Layout.PinAbove - GetTop(this);
+            else {SetTop(this,ropeY-Layout.PinAbove);Height=Layout.PanelHeight-ropeY;}
         }
         _rotate.Angle = _swing.Value + Item.Tilt;
         _drop.Y = _arrive.Value;

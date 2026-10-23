@@ -16,7 +16,9 @@ namespace Snapline;
 /// </summary>
 public sealed class AppController : IDisposable
 {
-    private readonly Line _line = new();
+    private readonly Line _line;
+    private readonly bool _testMode;
+    private readonly AutoHideGate _hideGate = new();
     private readonly LineWindow _panel;
     private readonly MessageWindow _messages = new();
     private readonly TrayIcon _tray;
@@ -35,7 +37,6 @@ public sealed class AppController : IDisposable
     /// <summary>A new screenshot shows itself for a moment, then tucks away.</summary>
     private DateTime _peekUntil = DateTime.MinValue;
     private DateTime? _hotZoneSince;
-    private DateTime? _awaySince;
     /// <summary>Whether the line should be up, if nothing prevents it. A full screen app on that screen does.</summary>
     private bool _wanted;
     /// <summary>Set when you open the line on purpose, so it stays up while empty.</summary>
@@ -46,14 +47,18 @@ public sealed class AppController : IDisposable
     /// <summary>Captures that just hung from a file, so the clipboard copy of the same one is skipped.</summary>
     private readonly List<(DateTime when, int w, int h)> _recentFileCaptures = new();
 
-    private static readonly TimeSpan RetractDelay = TimeSpan.FromSeconds(0.5);
+    private TimeSpan RetractDelay => TimeSpan.FromSeconds(double.IsFinite(Settings.Current.AutoHideDelay) ? Math.Clamp(Settings.Current.AutoHideDelay,.5,30) : 2.5);
     /// <summary>A click near the top edge means work in the window there, not a wish for the line. Stays set until the pointer leaves the edge.</summary>
     private bool _edgeSuppressed;
     private POINT _restingAt;
     private bool _buttonWasDown;
+    private bool _clearPending;
 
-    public AppController()
+    public AppController(bool testing = false)
     {
+        _testMode=testing;
+        if(CaptureSession.Refresh(Settings.Current,CaptureSession.CurrentKey,CaptureSession.Today,Shell.Recycle)) Settings.Current.Save();
+        _line=new Line();
         OleInitialize(IntPtr.Zero);
         Shell.MigrateStartup();
         Originals.Sweep(_line.Items.Select(i => i.Path));
@@ -71,14 +76,13 @@ public sealed class AppController : IDisposable
         _tray = new TrayIcon { MenuProvider = BuildMenu };
         _tray.LeftClick += Toggle;
         _panel.Canvas.MenuRequested += () => Menus.Show(BuildMenu());
+        _panel.Canvas.ClearRequested += RequestClearAll;
 
         _clipboard = new ClipboardWatcher(_messages, OnClipboardCapture, RecentlyHungFromFile)
         {
             Enabled = Settings.Current.CatchClipboard,
         };
-        _clipboard.Start();
-        StartWatchers();
-        RegisterHotKey();
+        if(!testing) { _clipboard.Start();StartWatchers();RegisterHotKey(); }
 
         _line.Fall += Fall;
         _line.ItemsChanged += ItemsChanged;
@@ -88,7 +92,7 @@ public sealed class AppController : IDisposable
         _mouseTimer.Tick += (_, _) => Tick();
 
         _themeTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromSeconds(2) };
-        _themeTimer.Tick += (_, _) => Theme.Refresh();
+        _themeTimer.Tick += (_, _) => { Theme.Refresh();if(!InteractionBusy) EnsureSession(); };
         _themeTimer.Start();
 
         Microsoft.Win32.SystemEvents.DisplaySettingsChanged += (_, _) => _panel.Dispatcher.BeginInvoke(() =>
@@ -153,6 +157,7 @@ public sealed class AppController : IDisposable
     /// <summary>A new screenshot lifts off from where it was taken and flies to its place on the line.</summary>
     private void HangCapture(string path, bool fromFile)
     {
+        EnsureSession();
         var thumb = Thumbnails.Load(path);
         if (thumb is null) return;
         if (fromFile) _recentFileCaptures.Add((DateTime.Now, thumb.Value.PixelWidth, thumb.Value.PixelHeight));
@@ -175,7 +180,10 @@ public sealed class AppController : IDisposable
             return;
         }
         int pixels = (int)Math.Max(from.Width, from.Height);
-        var image = Thumbnails.Load(item.Path, Math.Min(3000, Math.Max(400, pixels)), 2)?.Image ?? item.Thumb;
+        // Only a transient animation preview. Never rewrites the original;
+        // copy/open/markup continue to load the full-resolution source file.
+        int previewLimit=Settings.Current.CompactFlightPreview ? 1152 : 1600;
+        var image = Thumbnails.Load(item.Path, Math.Min(previewLimit, Math.Max(400, pixels)), 1)?.Image ?? item.Thumb;
         FlightWindow.Fly(image, from, to, item.Tilt, monitor, Seed(item), () => _line.Land(id));
     }
 
@@ -224,14 +232,11 @@ public sealed class AppController : IDisposable
             Refresh();
             Reveal(peekFor: 2.5, reason: "new capture");
         }
-        else if (live == 0 && !_keepOpen)
+        else if (live < _lastLiveCount)
         {
-            Later(0.7, () =>
-            {
-                if (_line.LiveCount != 0 || _keepOpen) return;
-                _wanted = false;
-                Refresh();
-            });
+            // Removing a card must not be mistaken for a click through its
+            // newly empty slot. Empty lines remain until the leave deadline.
+            _hideGate.Cancel();
         }
         _lastLiveCount = live;
     }
@@ -243,7 +248,7 @@ public sealed class AppController : IDisposable
         bool blocked = FullScreen.IsActive(monitor);
         if (_wanted && !blocked) Present(); else Dismiss();
         // The pointer is watched while there is a line, even tucked away, to notice it pushing against the top edge.
-        if (_wanted) _mouseTimer.Start(); else StopMouseTracking();
+        if (_wanted && !_testMode) _mouseTimer.Start(); else StopMouseTracking();
     }
 
     private void Present()
@@ -267,7 +272,7 @@ public sealed class AppController : IDisposable
         if (!_isRevealed) Log.Notice($"Reveal: {reason}");
         if (pinned) _pinned = true;
         if (peekFor > 0) _peekUntil = DateTime.Now.AddSeconds(peekFor);
-        _awaySince = null;
+        _hideGate.Cancel();
         SetRevealed(true);
     }
 
@@ -316,14 +321,24 @@ public sealed class AppController : IDisposable
 
     private static bool ButtonDown() => (GetAsyncKeyState(0x01) < 0) || (GetAsyncKeyState(0x02) < 0) || (GetAsyncKeyState(0x04) < 0);
 
-    private void Tick()
+    private bool InteractionBusy => _clearPending || _line.MenuOpen || _line.PressedId is not null
+        || _line.DraggingId is not null || DragSource.IsDragging || _panel.Canvas.RopeDragging
+        || Application.Current.Windows.Cast<Window>().Any(w=>w.IsVisible && (w is MarkupWindow or NoteWindow or SettingsWindow));
+
+    private void EnsureSession()
     {
-        var mouse = Displays.Cursor();
-        var now = DateTime.Now;
+        if(CaptureSession.Refresh(Settings.Current,CaptureSession.CurrentKey,CaptureSession.Today,Shell.Recycle))
+        {
+            _line.Clear();Settings.Current.Save();
+        }
+    }
+
+    private void Tick() => TickAt(Displays.Cursor(),ButtonDown(),DateTime.Now);
+
+    internal void TickAt(POINT mouse,bool buttonDown,DateTime now,double? monotonicSeconds=null)
+    {
         var displayUnderPointer = Displays.Containing(mouse);
         bool inHotBand = displayUnderPointer is not null && displayUnderPointer.HotBand.Contains(mouse);
-        bool buttonDown = ButtonDown();
-        bool justPressed = buttonDown && !_buttonWasDown;
         _buttonWasDown = buttonDown;
         if (!inHotBand) _edgeSuppressed = false;
 
@@ -377,15 +392,6 @@ public sealed class AppController : IDisposable
         var local = _panel.ToCanvas(mouse);
         _panel.Canvas.UpdateHover(dragging ? null : local);
 
-        // A click that goes through the strip into the window underneath puts
-        // the line away at once: you are working there.
-        if (justPressed && !dragging && !holding && !_line.MenuOpen && !_panel.IsOverPhoto(mouse))
-        {
-            _edgeSuppressed = inHotBand;
-            SetRevealed(false);
-            return;
-        }
-
         // The line's zone runs from its lowest point up to the top of the screen, so moving up never hides it.
         var frame = _panel.Frame;
         var zone = frame;
@@ -394,21 +400,18 @@ public sealed class AppController : IDisposable
         if (inside && _pinned) _pinned = false;
 
         bool pendingHold = Settings.Current.StayDownWhileUnused && _line.HasUnused;
-        bool busy = _pinned || dragging || holding || _line.MenuOpen || now < _peekUntil || pendingHold;
-        if (inside || busy)
+        bool busy = _pinned || dragging || holding || InteractionBusy || now < _peekUntil || pendingHold || (inside && buttonDown);
+        if (_hideGate.ShouldHide(monotonicSeconds??Environment.TickCount64/1000.0,inside,busy,RetractDelay.TotalSeconds))
         {
-            _awaySince = null;
-        }
-        else
-        {
-            _awaySince ??= now;
-            if (now - _awaySince.Value >= RetractDelay)
-            {
-                _awaySince = null;
-                SetRevealed(false);
-            }
+            SetRevealed(false);
+            if(_line.LiveCount==0 && !_keepOpen) { _wanted=false;Refresh(); }
         }
     }
+
+    internal Line TestLine=>_line;
+    internal bool TestRevealed=>_isRevealed;
+    internal RECT TestFrame=>_panel.Frame;
+    internal LineCanvas TestCanvas=>_panel.Canvas;
 
     private void UpdateCapacity()
     {
@@ -460,7 +463,7 @@ public sealed class AppController : IDisposable
         menu.Opened += (_, _) => _line.MenuOpen = true;
         menu.Closed += (_, _) => _line.MenuOpen = false;
         menu.Items.Add(PeggedControl.MenuItemFor(_isRevealed ? Strings.HideLine : Strings.ShowLine, Toggle, Settings.Current.HotKey));
-        var clear = PeggedControl.MenuItemFor(Strings.TakeEverythingDown, () => _line.Clear());
+        var clear = PeggedControl.MenuItemFor(Strings.TakeEverythingDown, RequestClearAll);
         clear.IsEnabled = _line.LiveCount > 0;
         menu.Items.Add(clear);
         menu.Items.Add(PeggedControl.MenuItemFor(Strings.NewCapture, Shell.Snip, "Win+Shift+S"));
@@ -531,6 +534,26 @@ public sealed class AppController : IDisposable
             Strings.About, MessageBoxButton.OK, MessageBoxImage.None, MessageBoxResult.OK,
             Strings.IsRtl ? MessageBoxOptions.RtlReading | MessageBoxOptions.RightAlign : MessageBoxOptions.None);
     }
+
+    private void RequestClearAll()
+        => ConfirmClear(()=>MessageBox.Show(_panel,Strings.ClearConfirm,Strings.TakeEverythingDown,
+            MessageBoxButton.YesNo,MessageBoxImage.Question,MessageBoxResult.No)==MessageBoxResult.Yes);
+
+    internal bool ConfirmClear(Func<bool> confirmation)
+    {
+        if(_line.LiveCount==0 || _clearPending) return false;
+        _clearPending=true;
+        _line.MenuOpen=true;
+        try
+        {
+            if(!confirmation()) return false;
+            _line.Clear();_hideGate.Cancel();
+            return true;
+        }
+        finally { _line.MenuOpen=false;_clearPending=false; }
+    }
+
+    internal void TestRequestClearAll()=>RequestClearAll();
 
     private static void Later(double seconds, Action action)
     {

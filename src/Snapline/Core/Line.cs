@@ -129,6 +129,7 @@ public sealed class Line
     {
         var item = Find(id);
         if (item is null || item.Falling) return;
+        if(PressedId==id) PressedId=null;
         Fall?.Invoke(item);
         item.Falling = true;
         Originals.Forget(item.Path);
@@ -143,13 +144,11 @@ public sealed class Line
 
     public void Clear()
     {
-        var live = _items.Where(i => !i.Falling).ToList();
-        for (int n = 0; n < live.Count; n++)
-        {
-            var id = live[n].Id;
-            bool quiet = n > 0;
-            Later(0.06 * n, () => Drop(id, quiet));
-        }
+        // One mutation/save/layout event, not N overlapping fullscreen fall
+        // windows. This operation takes cards down; it never deletes originals.
+        foreach(var item in _items) Originals.Forget(item.Path);
+        _items.Clear();PressedId=null;DraggingId=null;CopiedId=null;
+        Save();ItemsChanged?.Invoke();
     }
 
     /// <summary>Remembers where a photo was put by hand.</summary>
@@ -292,6 +291,7 @@ public sealed class Line
         }
         Log.Notice($"Recycled {Path.GetFileName(item.Path)}");
         Notes.Forget(item.Path);
+        Settings.Current.OwnedCaptures.Remove(System.IO.Path.GetFullPath(item.Path));
         Sounds.PlayWhoosh();
         Drop(id, quietly: true);
     }
@@ -324,6 +324,7 @@ public sealed class Line
             Directory.CreateDirectory(folder);
             var target = Inbox.UniquePath(folder, Path.GetFileName(item.Path));
             File.Move(item.Path, target);
+            Settings.Current.OwnedCaptures.Remove(System.IO.Path.GetFullPath(item.Path));
             Drop(id, quietly: true);
         }
         catch (Exception e)
@@ -408,13 +409,17 @@ public sealed class Line
 
     private void Restore()
     {
-        foreach (var path in Settings.Current.Pegged.ToList())
+        var paths=Settings.Current.Pegged.ToList();
+        var pins=Settings.Current.PinnedPaths.ToList();
+        var spots=new Dictionary<string,double>(Settings.Current.Spots,StringComparer.OrdinalIgnoreCase);
+        foreach (var path in paths)
             if (File.Exists(path) && Hang(path, quietly: true) is { } id && Find(id) is { } item)
             {
                 item.Used = true;
-                item.Pinned = Settings.Current.PinnedPaths.Contains(path, StringComparer.OrdinalIgnoreCase);
-                if (Settings.Current.Spots.TryGetValue(path, out var spot)) item.Spot = spot;
+                item.Pinned = pins.Contains(path, StringComparer.OrdinalIgnoreCase);
+                if (spots.TryGetValue(path, out var spot)) item.Spot = spot;
             }
+        Save();
     }
 
     private void Later(double seconds, Action action)

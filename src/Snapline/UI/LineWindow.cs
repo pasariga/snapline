@@ -25,6 +25,12 @@ public sealed class LineWindow : Window
     public bool HoldMouse { get; set; }
 
     private bool _clickThrough = true;
+    private int _slideGeneration;
+    private Action? _cancelSlide;
+    private System.Windows.Media.Imaging.BitmapSource? _slideSnapshot;
+    private (int scene,double width,uint dpi) _snapshotKey;
+    private long _slideStarted;
+    private double _slideFrom,_slideTo,_slideSeconds;
 
     /// <summary>True: every click goes to the window underneath. False: the strip takes the mouse.</summary>
     public bool ClickThrough
@@ -41,6 +47,7 @@ public sealed class LineWindow : Window
     public LineWindow(Line line)
     {
         Canvas = new LineCanvas(line);
+        Canvas.SlideRenderer=TrySlide;
         Title = Strings.AppName;
         WindowStyle = WindowStyle.None;
         ResizeMode = ResizeMode.NoResize;
@@ -128,6 +135,7 @@ public sealed class LineWindow : Window
         if (!Canvas.Revealed) return false;
         var p = ToCanvas(screen);
         if (p is null) return false;
+        if(Canvas.ClearRect is { } clear && clear.Contains(p.Value)) return true;
         foreach (var (_, rect) in Canvas.HitRects())
             if (rect.Contains(p.Value)) return true;
         if (Canvas.HintRect is { } hint && hint.Contains(p.Value)) return true;
@@ -181,5 +189,49 @@ public sealed class LineWindow : Window
             GetWindowRect(Handle, out var r);
             return r;
         }
+    }
+
+    private bool TrySlide(bool on,double currentY)
+    {
+        if(Handle==IntPtr.Zero || Display is null) return false;
+        try
+        {
+            // A rapid re-entry reverses from the visible compositor position,
+            // not from the old WPF endpoint that waited behind it.
+            if(_cancelSlide is not null && _slideStarted!=0)
+            {
+                double t=Math.Clamp(System.Diagnostics.Stopwatch.GetElapsedTime(_slideStarted).TotalSeconds/_slideSeconds,0,1);
+                currentY=(_slideFrom+(_slideTo-_slideFrom)*(1-Math.Pow(1-t,3)))/Display.Scale;
+            }
+            var clock=System.Diagnostics.Stopwatch.StartNew();
+            var key=(Canvas.SceneVersion,Canvas.ActualWidth,Display.Dpi);
+            if(_slideSnapshot is null || key!=_snapshotKey)
+            {
+                _slideSnapshot=Canvas.SnapshotForSlide(Display.Dpi,on);_snapshotKey=key;
+            }
+            var image=_slideSnapshot;
+            double captureMs=clock.Elapsed.TotalMilliseconds;
+            int generation=++_slideGeneration;
+            var previous=_cancelSlide;
+            Canvas.HoldNativePosition(currentY);
+            Opacity=1;
+            previous?.Invoke();
+            Canvas.SuspendForNative();
+            double end=on?0:-(Layout.PanelHeight+12)*Display.Scale;
+            double from=currentY*Display.Scale,seconds=on?.28:.22;
+            _slideStarted=0;
+            _cancelSlide=CompositorFlight.StartPanel(image,Frame,currentY*Display.Scale,end,on?.28:.22,
+                ()=>{if(generation==_slideGeneration){_slideFrom=from;_slideTo=end;_slideSeconds=seconds;_slideStarted=System.Diagnostics.Stopwatch.GetTimestamp();Opacity=0;}},
+                ok=>{if(generation==_slideGeneration){if(ok)Canvas.FinishNativeSlide(on);else Canvas.FallbackSlide(on,currentY);Opacity=1;_cancelSlide=null;_slideStarted=0;}},captureMs);
+            return true;
+        }
+        catch {Opacity=1;Canvas.FallbackSlide(on,currentY);return true;}
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        _slideGeneration++;_cancelSlide?.Invoke();_ropeFollow.Stop();
+        FullScreen.Own.Remove(Handle);
+        base.OnClosed(e);
     }
 }

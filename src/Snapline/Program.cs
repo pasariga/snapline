@@ -5,6 +5,16 @@ public static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        if(args.Length>0 && (args[0] is "--animation-bench" or "--session-selftest" or "--panel-bench" or "--session-fixture" or "--markup-test" or "--note-test" or "--clear-dialog-test"))
+            Environment.SetEnvironmentVariable("SNAPLINE_TEST_PROFILE",Environment.GetEnvironmentVariable("SNAPLINE_TEST_PROFILE") ?? "SnaplineSessionDiagnostics");
+        if(args.Length==2 && args[0]=="--session-selftest") return UI.BehaviorTests.Run("selftest",args[1]);
+        if(args.Length==2 && args[0]=="--clear-dialog-test") return UI.BehaviorTests.Run("clear-dialog",args[1]);
+        if(args.Length==3 && args[0]=="--panel-bench") return UI.BehaviorTests.Run(args[1],args[2]);
+        if(args.Length==3 && args[0]=="--session-fixture") return UI.BehaviorTests.SessionFixture(args[1],args[2]);
+        if (args.Length == 2 && args[0] == "--window-audit")
+            return Interop.WindowAudit.Run(args[1]);
+        if (args.Length == 3 && args[0] == "--animation-bench")
+            return UI.AnimationBenchmark.Run(args[1], args[2]);
         if (args.Length == 3 && args[0] == "--ocr")
         {
             // Reads the text in an image into a file: for checking the OCR without a desktop.
@@ -45,8 +55,9 @@ public static class Program
             try { return Snapshot.Run(args); }
             catch (Exception e) { Core.Log.Error($"Snapshot failed: {e}"); return 1; }
         }
-        using var mutex = new Mutex(true, @"Local\Snapline.SingleInstance", out bool first);
-        var signal = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\Snapline.Toggle");
+        string instance=Environment.GetEnvironmentVariable("SNAPLINE_TEST_PROFILE") is null ? "Snapline" : "SnaplineSessionTest";
+        using var mutex = new Mutex(true, $@"Local\{instance}.SingleInstance", out bool first);
+        var signal = new EventWaitHandle(false, EventResetMode.AutoReset, $@"Local\{instance}.Toggle");
         if (!first)
         {
             // Already running: bring the line down and leave.

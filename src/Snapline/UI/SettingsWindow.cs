@@ -90,6 +90,13 @@ public sealed class SettingsWindow : Window
         stack.Children.Add(Check(Strings.RevealAtTopEdge, Strings.RevealAtTopEdgeTip, s.RevealAtTopEdge, v => s.RevealAtTopEdge = v));
         stack.Children.Add(Check(Strings.StayDownWhileUnused, Strings.StayDownWhileUnusedTip, s.StayDownWhileUnused, v => s.StayDownWhileUnused = v));
         stack.Children.Add(Check(Strings.TakeDownAfterDrag, Strings.TakeDownAfterDragTip, s.TakeDownAfterDrag, v => s.TakeDownAfterDrag = v));
+        var hideDelay=new TextBox {Text=s.AutoHideDelay.ToString("0.0"),Width=70,Padding=new Thickness(8,4,8,4)};
+        void SaveDelay() {if(double.TryParse(hideDelay.Text,out double v) && double.IsFinite(v)){s.AutoHideDelay=Math.Clamp(v,.5,30);hideDelay.Text=s.AutoHideDelay.ToString("0.0");Changed();}}
+        hideDelay.LostFocus+=(_,_)=>SaveDelay();
+        hideDelay.KeyDown+=(_,e)=>{if(e.Key==Key.Enter){SaveDelay();Keyboard.ClearFocus();}};
+        stack.Children.Add(Row(Strings.AutoHideDelay,hideDelay));
+        stack.Children.Add(Check("Compact preview for large captures (45% screen width)",
+            "Only the transient animation preview changes; original captures stay full resolution.",s.CompactFlightPreview,v=>s.CompactFlightPreview=v));
 
         _hotKey = new TextBox { Text = s.HotKey, IsReadOnly = true, Width = 170, Padding = new Thickness(8, 4, 8, 4), ToolTip = Strings.ShortcutTip, HorizontalAlignment = HorizontalAlignment.Left };
         _hotKey.PreviewKeyDown += OnHotKeyPressed;

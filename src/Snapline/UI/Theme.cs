@@ -41,7 +41,7 @@ public static class Theme
     {
         bool a = AppsDark, s = SystemDark;
         Read();
-        Apply();
+        if(a!=AppsDark || s!=SystemDark || !_resourcesApplied) Apply();
         if (a != AppsDark || s != SystemDark) Changed?.Invoke();
     }
 
@@ -68,6 +68,7 @@ public static class Theme
     {
         var res = Application.Current?.Resources;
         if (res is null) return;
+        _resourcesApplied=true;
         bool dark = AppsDark;
         res["MenuBg"] = Freeze(new SolidColorBrush(dark ? Color.FromRgb(0x2B, 0x2B, 0x2B) : Color.FromRgb(0xF9, 0xF9, 0xF9)));
         res["MenuBorder"] = Freeze(new SolidColorBrush(dark ? Gray(1, 0.09) : Gray(0, 0.10)));
@@ -76,4 +77,5 @@ public static class Theme
         res["MenuHover"] = Freeze(new SolidColorBrush(dark ? Gray(1, 0.07) : Gray(0, 0.05)));
         res["MenuSeparator"] = Freeze(new SolidColorBrush(dark ? Gray(1, 0.09) : Gray(0, 0.08)));
     }
+    private static bool _resourcesApplied;
 }

@@ -28,6 +28,13 @@ public partial class App : Application
         };
         AppDomain.CurrentDomain.UnhandledException += (_, ex) => Log.Error($"Fatal: {ex.ExceptionObject}");
 
+        if(BehaviorTests.Active) {BehaviorTests.Start(this);return;}
+        if (AnimationBenchmark.Active)
+        {
+            AnimationBenchmark.Start(this);
+            return;
+        }
+
         if (e.Args.Length == 2 && e.Args[0] == "--markup-test")
         {
             bool ok = UI.MarkupWindow.SelfTest(System.IO.Path.GetFullPath(e.Args[1]), new Line(persist: false));

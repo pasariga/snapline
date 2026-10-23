@@ -7,8 +7,10 @@ namespace Snapline.Core;
 /// <summary>Everything the app remembers, in one small JSON file.</summary>
 public sealed class Settings
 {
-    public static string Folder { get; } = Migrate(Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Snapline"));
+    // Automated tests use a separate profile; normal launches keep existing settings.
+    public static string Folder { get; } = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        Environment.GetEnvironmentVariable("SNAPLINE_TEST_PROFILE") ?? "Snapline");
 
     /// <summary>The app used to be called Clothesline. Its folder, settings and caught captures come along.</summary>
     private static string Migrate(string folder)
@@ -96,6 +98,12 @@ public sealed class Settings
     public string Language { get; set; } = "auto";
     public bool Welcomed { get; set; }
     public string HotKey { get; set; } = "Ctrl+Alt+T";
+    public double AutoHideDelay { get; set; } = 2.5;
+    public bool CompactFlightPreview { get; set; }
+    public string? CaptureSessionKey { get; set; }
+    public string? CaptureSessionDay { get; set; }
+    public Dictionary<string,OwnedCapture> OwnedCaptures { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    [JsonExtensionData] public Dictionary<string,JsonElement>? ExtraSettings { get; set; }
     /// <summary>Extra folders to watch, for ShareX, Greenshot and friends.</summary>
     public List<string> WatchFolders { get; set; } = new();
     /// <summary>Where clipboard captures are written. Defaults to Snapline's own folder.</summary>
@@ -113,6 +121,7 @@ public sealed class Settings
                 // Paths are matched regardless of case; the deserializer forgets that.
                 loaded.Spots = new Dictionary<string, double>(loaded.Spots, StringComparer.OrdinalIgnoreCase);
                 loaded.Notes = new Dictionary<string, NoteData>(loaded.Notes, StringComparer.OrdinalIgnoreCase);
+                loaded.OwnedCaptures = new Dictionary<string, OwnedCapture>(loaded.OwnedCaptures, StringComparer.OrdinalIgnoreCase);
                 return loaded;
             }
         }

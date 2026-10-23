@@ -35,6 +35,9 @@ public static class Strings
     private static string L(string en) => Language == "ar" && Ar.TryGetValue(en, out var ar) ? ar : en;
 
     public const string AppName = "Snapline";
+    public static string ClearAll => CultureInfo.CurrentUICulture.TwoLetterISOLanguageName=="zh" ? "清空全部" : "Clear all";
+    public static string AutoHideDelay => CultureInfo.CurrentUICulture.TwoLetterISOLanguageName=="zh" ? "离开后自动隐藏（秒）" : "Auto-hide delay (seconds)";
+    public static string ClearConfirm => CultureInfo.CurrentUICulture.TwoLetterISOLanguageName=="zh" ? "移除当前晾衣绳上的全部截图？原始图片不会被删除。" : "Take all captures off the line? Original image files will not be deleted.";
     public static string Tagline => L("Screenshots, hung out to dry.");
 
     public static string ShowLine => L("Show line");

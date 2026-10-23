@@ -16,7 +16,7 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
-    <Version>1.6.1</Version>
+    <Version>1.6.2-local.20261016.2</Version>
     <Product>Snapline</Product>
     <Authors>Snapline</Authors>
     <Description>Screenshots, hung out to dry. A clothesline for your screenshots along the top of the screen.</Description>
@@ -37,6 +37,12 @@
     <Resource Include="Assets\Lockup.png" />
     <Resource Include="Assets\LockupDark.png" />
     <Resource Include="Assets\Fonts\Manrope-ExtraBold.ttf" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Vortice.DirectComposition" Version="3.8.3" />
+    <PackageReference Include="Vortice.Direct2D1" Version="3.8.3" />
+    <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
   </ItemGroup>
 
 </Project>

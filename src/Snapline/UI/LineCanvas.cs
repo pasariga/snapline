@@ -32,6 +32,11 @@ public sealed class LineCanvas : Canvas
     private double _lastTime;
     private bool _ticking;
     private double _width;
+    private (double width,Color color,bool bows)? _ropeKey;
+    private readonly Button _clearButton;
+    private bool _nativeSliding;
+    internal Func<bool,double,bool>? SlideRenderer;
+    internal int SceneVersion {get;private set;}
 
     public LineCanvas(Line line)
     {
@@ -88,8 +93,8 @@ public sealed class LineCanvas : Canvas
 
         _line.ItemsChanged += Sync;
         _line.ItemUpdated += OnItemUpdated;
-        _line.Gust += () => { foreach (var c in _cards) if (!c.Item.Falling) c.Breeze(); StartTicking(); };
-        _line.StateChanged += () => { foreach (var c in _cards) c.StateChanged(); StartTicking(); };
+        _line.Gust += () => { foreach (var c in _cards.Where(c=>!c.Item.Falling).OrderBy(_=>Random.Shared.Next()).Take(2)) c.Breeze(); StartTicking(); };
+        _line.StateChanged += () => { SceneVersion++;foreach (var c in _cards) c.StateChanged(); StartTicking(); };
         Theme.Changed += Repaint;
         Pegs.LookChanged += Repaint;
         Strings.LanguageChanged += Repaint;
@@ -105,6 +110,11 @@ public sealed class LineCanvas : Canvas
         _tag = BuildTag();
         Children.Add(_tag);
         SetZIndex(_tag, 2);
+        _clearButton=new Button {Content=Strings.ClearAll,FontSize=11,Padding=new Thickness(9,3,9,3),
+            Background=Theme.Freeze(new SolidColorBrush(Theme.HintFill)),Foreground=Theme.Freeze(new SolidColorBrush(Theme.Primary)),
+            Cursor=System.Windows.Input.Cursors.Hand,ToolTip=Strings.ClearConfirm};
+        _clearButton.Click+=(_,e)=>{e.Handled=true;ClearRequested?.Invoke();};
+        Children.Add(_clearButton);SetZIndex(_clearButton,100);
         LostMouseCapture += (_, _) => { if (_ropeDrag) { _ropeDrag = false; RopeDragEnded?.Invoke(); } };
         SizeChanged += (_, _) => Relayout(snap: true);
         Sync();
@@ -122,6 +132,7 @@ public sealed class LineCanvas : Canvas
 
     private void Repaint()
     {
+        SceneVersion++;
         PaintRope();
         if (_width > 0) DrawRope();
         _hint.Background = Theme.Freeze(new SolidColorBrush(Theme.HintFill));
@@ -129,6 +140,7 @@ public sealed class LineCanvas : Canvas
         ((TextBlock)_hint.Child).Text = Strings.Hint;
         _hint.ToolTip = Strings.NewCaptureTip;
         _hint.FlowDirection = Strings.Flow;
+        _clearButton.Content=Strings.ClearAll;
         // Cards are rebuilt with the new colours.
         foreach (var c in _cards.ToList()) Children.Remove(c);
         _cards.Clear();
@@ -142,6 +154,7 @@ public sealed class LineCanvas : Canvas
         {
             if (_revealed == value) return;
             _revealed = value;
+            if(PeggedControl.OptimizedRendering && SlideRenderer?.Invoke(value,_reveal.Y)==true) return;
             if (value)
             {
                 // Tucked away, the whole line waits above the top edge and slides
@@ -165,6 +178,7 @@ public sealed class LineCanvas : Canvas
 
     private void Sync()
     {
+        SceneVersion++;
         var items = _line.Items;
         // Remove what is gone.
         foreach (var card in _cards.Where(c => !items.Contains(c.Item)).ToList())
@@ -182,7 +196,9 @@ public sealed class LineCanvas : Canvas
             Children.Add(card);
             SetZIndex(card, 2);
         }
-        _cards.Sort((a, b) => items.ToList().IndexOf(a.Item).CompareTo(items.ToList().IndexOf(b.Item)));
+        var order=items.Select((item,index)=>(item,index)).ToDictionary(x=>x.item,x=>x.index);
+        _cards.Sort((a,b)=>order[a.Item].CompareTo(order[b.Item]));
+        _clearButton.Visibility=_line.LiveCount>0 ? Visibility.Visible : Visibility.Collapsed;
         Relayout(snap: false);
         bool empty = _line.LiveCount == 0;
         _hintOpacity.Go(empty ? 1 : 0, 0.3);
@@ -191,10 +207,12 @@ public sealed class LineCanvas : Canvas
 
     private void OnItemUpdated(Pegged item)
     {
+        SceneVersion++;
         var card = _cards.FirstOrDefault(c => c.Item == item);
         if (card is null) return;
-        if (!item.Flying && card.Opacity == 0 && !item.Falling) card.Land();
-        card.Refresh();
+        bool landing=!item.Flying && card.Opacity==0 && !item.Falling;
+        card.Refresh(nudge:!landing);
+        if(landing) card.Land();
         StartTicking();
     }
 
@@ -227,6 +245,9 @@ public sealed class LineCanvas : Canvas
         SetTop(_tag, Layout.RopeY(tagX, _width) - Layout.PinAbove * 0.75);
         SetLeft(_hint, mid - _hint.DesiredSize.Width / 2);
         SetTop(_hint, Layout.RopeY(mid, _width) + 34 - _hint.DesiredSize.Height / 2);
+        _clearButton.Measure(new Size(double.PositiveInfinity,double.PositiveInfinity));
+        SetLeft(_clearButton,Math.Max(0,_width-165));
+        SetTop(_clearButton,Layout.RopeY(Math.Max(0,_width-125),_width)+12);
     }
 
     /// <summary>The nearest place to the middle of the line with room for a card, remembered on the photo.</summary>
@@ -251,6 +272,9 @@ public sealed class LineCanvas : Canvas
 
     private void DrawRope()
     {
+        var key=(_width,Pegs.Rope(),Settings.Current.Bows);
+        if(_ropeKey==key) return;
+        _ropeKey=key;
         double top = Layout.RopeTop, w = _width;
         var fig = new PathFigure { StartPoint = new Point(-20, top) };
         fig.Segments.Add(new QuadraticBezierSegment(new Point(w / 2, top + 2 * Layout.Sag(w)), new Point(w + 20, top), true));
@@ -317,6 +341,7 @@ public sealed class LineCanvas : Canvas
 
     public void EndReorder(PeggedControl card)
     {
+        SceneVersion++;
         if (_held != card) return;
         _held = null;
         // The last one moved lies on top of any it was dropped against.
@@ -330,6 +355,9 @@ public sealed class LineCanvas : Canvas
 
     /// <summary>The menu was asked for, from the tag or a right click on the rope.</summary>
     public event Action? MenuRequested;
+    public event Action? ClearRequested;
+    public Rect? ClearRect=>_clearButton.IsVisible ? new Rect(GetLeft(_clearButton),GetTop(_clearButton),
+        _clearButton.ActualWidth,_clearButton.ActualHeight) : null;
 
     private const double TagWidth = 34, TagHeight = 26;
 
@@ -452,7 +480,7 @@ public sealed class LineCanvas : Canvas
         _hintOpacity.Step(dt);
         _hint.Opacity = _hintOpacity.Value;
         active |= !_hintOpacity.Done;
-        foreach (var card in _cards) { card.Tick(dt); active |= card.Active; }
+        foreach (var card in _cards) { if(!PeggedControl.OptimizedRendering || card.Active || card.Item.Falling || card.Item.Flying) card.Tick(dt); active |= card.Active; }
         return active;
     }
 
@@ -460,6 +488,8 @@ public sealed class LineCanvas : Canvas
 
     private void StartTicking()
     {
+        if(_nativeSliding) return;
+        if(!_revealed && !_usingSpring && _hideTween.Done) return;
         if (_ticking) return;
         _ticking = true;
         _clock.Restart();
@@ -467,10 +497,47 @@ public sealed class LineCanvas : Canvas
         CompositionTarget.Rendering += OnRendering;
     }
 
+    internal System.Windows.Media.Imaging.BitmapSource SnapshotForSlide(uint dpi,bool reveal)
+    {
+        double y=_reveal.Y;_reveal.Y=0;
+        try
+        {
+            if(reveal)foreach(var card in _cards)card.SettleForSlide();
+            UpdateLayout();
+            var bitmap=new System.Windows.Media.Imaging.RenderTargetBitmap((int)Math.Ceiling(ActualWidth*dpi/96.0),
+                (int)Math.Ceiling(Layout.PanelHeight*dpi/96.0),dpi,dpi,System.Windows.Media.PixelFormats.Pbgra32);
+            bitmap.Render(this);bitmap.Freeze();return bitmap;
+        }
+        finally{_reveal.Y=y;}
+    }
+    internal void SuspendForNative()
+    {
+        _nativeSliding=true;_ticking=false;CompositionTarget.Rendering-=OnRendering;
+    }
+    internal void HoldNativePosition(double y)
+    {
+        _reveal.Y=y;
+        _revealSpring.Snap(y);_hideTween.Snap(y);
+    }
+    internal void FinishNativeSlide(bool on)
+    {
+        _nativeSliding=false;_usingSpring=false;
+        double y=on?0:-(Layout.PanelHeight+12);
+        _reveal.Y=y;_revealSpring.Snap(y);_hideTween.Snap(y);
+        if(on) StartTicking();
+    }
+    internal void FallbackSlide(bool on,double from)
+    {
+        _nativeSliding=false;_reveal.Y=from;_usingSpring=on;
+        if(on){_revealSpring.Value=from;_revealSpring.Velocity=0;_revealSpring.Target=0;}
+        else{_hideTween.Snap(from);_hideTween.Go(-(Layout.PanelHeight+12),.22,Ease.InCubic);}
+        StartTicking();
+    }
+
     private void OnRendering(object? sender, EventArgs e)
     {
         double now = _clock.Elapsed.TotalSeconds;
-        double dt = Math.Clamp(now - _lastTime, 0, 1.0 / 20);
+        double dt = Math.Clamp(now - _lastTime, 0, .25);
         _lastTime = now;
         if (dt <= 0) return;
 

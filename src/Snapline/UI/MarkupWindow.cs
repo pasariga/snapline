@@ -438,6 +438,7 @@ public sealed class MarkupWindow : Window
             var tmp = _path + ".tmp";
             using (var stream = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None)) encoder.Save(stream);
             File.Move(tmp, _path, true);
+            CaptureSession.RefreshHash(_path);
             _dirty = false;
             _status.Text = Strings.Saved;
             _line.ReloadThumbnail(_path);

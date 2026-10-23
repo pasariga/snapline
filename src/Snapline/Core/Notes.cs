@@ -39,6 +39,7 @@ public static class Notes
         var data = new NoteData { Text = "", Color = color };
         Settings.Current.Notes[path] = data;
         Render(data, path);
+        CaptureSession.Own(path);
         Settings.Current.Save();
         return path;
     }
@@ -51,6 +52,7 @@ public static class Notes
         data.Color = color;
         Settings.Current.Notes[path] = data;
         Render(data, path);
+        CaptureSession.RefreshHash(path);
         Settings.Current.Save();
     }
 

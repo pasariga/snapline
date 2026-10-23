@@ -13,3 +13,8 @@ out/
 *.snk
 .DS_Store
 .idea/
+test-results/
+*.log
+.env
+.env.*
+!.env.example

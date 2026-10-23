@@ -44,6 +44,7 @@ public static class Originals
         var tmp = path + ".revert";
         File.Copy(source, tmp, true);
         File.Move(tmp, path, true);
+        CaptureSession.RefreshHash(path);
         return true;
     }
 

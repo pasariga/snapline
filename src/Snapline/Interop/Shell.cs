@@ -85,16 +85,7 @@ public static class Shell
     /// <summary>A Run entry left by the old name points at an exe that no longer exists; it becomes ours.</summary>
     public static void MigrateStartup()
     {
-        try
-        {
-            using var key = Registry.CurrentUser.OpenSubKey(RunKey, writable: true);
-            if (key?.GetValue("Clothesline") is string)
-            {
-                key.DeleteValue("Clothesline", false);
-                key.SetValue(RunName, $"\"{ExePath()}\"");
-            }
-        }
-        catch { }
+        // An isolated animation test must not take over production or legacy startup entries.
     }
 
     public static bool StartsWithWindows

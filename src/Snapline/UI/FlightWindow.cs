@@ -19,13 +19,27 @@ namespace Snapline.UI;
 /// </summary>
 public sealed class FlightWindow : Window
 {
-    public const double Duration = 0.65;
+    // Only the transient flight image changes its scaling algorithm. Saved images,
+    // the stationary card, copying, opening and editing retain the upstream path.
+    internal static bool FastResampling { get; set; } = false;
+    internal static bool FixedPhotoLayer { get; set; } = false;
+    internal static bool CachedShadow { get; set; } = false;
+    internal static bool UseCompositor { get; set; } = true;
+    internal static Action<FlightStatistics>? StatisticsSink { get; set; }
+    public const double Duration = 0.44;
+    internal const double FadeDuration = 0.075;
+    internal static double FlightEase(double raw) => 1 - Math.Pow(1 - Math.Clamp(raw, 0, 1), 3);
     private const double Arc = 30;
 
     private readonly Canvas _canvas = new();
     private readonly Grid _container = new();
     private readonly Border _glass;
     private readonly Image _photo;
+    private readonly Canvas? _photoLayer;
+    private readonly ScaleTransform _photoScale = new();
+    private readonly TranslateTransform _photoOffset = new();
+    private readonly RectangleGeometry _photoClip = new();
+    private readonly CachedFlightShadow? _cachedShadow;
     private readonly Border _edge;
     private readonly Grid _clip;
     private readonly RotateTransform _rotate = new();
@@ -38,10 +52,33 @@ public sealed class FlightWindow : Window
     private readonly Stopwatch _clock = new();
     private readonly Action? _completion;
     private readonly double _scale;
+    private FlightProbe? _probe;
     private static readonly List<FlightWindow> Current = new();
 
     /// <summary>A capture flying from where it was taken to its place on the line. Rects in physical pixels.</summary>
     public static void Fly(BitmapSource image, RECT from, RECT to, double tilt, Display monitor, int seed, Action completion)
+    {
+        from=PreviewRect(from,monitor,Core.Settings.Current.CompactFlightPreview);
+        if (UseCompositor)
+        {
+            try
+            {
+                CompositorFlight.Start(image,from,to,tilt,monitor,seed,completion);
+                return;
+            }
+            catch (Exception ex) { Core.Log.Error($"GPU flight setup fallback: 0x{ex.HResult:X8}"); }
+        }
+        FlyWpf(image,from,to,tilt,monitor,seed,completion);
+    }
+    internal static RECT PreviewRect(RECT from,Display monitor,bool compact)
+    {
+        if(!compact || from.Width<monitor.Bounds.Width*.65) return from;
+        double ratio=Math.Min(1,monitor.Bounds.Width*.45/from.Width);
+        int w=(int)Math.Round(from.Width*ratio),h=(int)Math.Round(from.Height*ratio);
+        int x=from.Left+(from.Width-w)/2,y=from.Top+(from.Height-h)/2;
+        return new RECT(x,y,x+w,y+h);
+    }
+    internal static void FlyWpf(BitmapSource image, RECT from, RECT to, double tilt, Display monitor, int seed, Action completion)
     {
         var w = new FlightWindow(image, from, to, tilt, monitor, falling: false, Duration, completion, seed);
         Current.Add(w);
@@ -54,6 +91,23 @@ public sealed class FlightWindow : Window
         var w = new FlightWindow(image, card, card, tilt, monitor, falling: true, 0.55, null, seed);
         Current.Add(w);
         w.Run();
+    }
+
+    internal static void SaveVerificationFrame(BitmapSource image, RECT from, RECT to,
+        Display monitor, double progress, string path)
+    {
+        var window = new FlightWindow(image, from, to, -2, monitor, false, Duration, null, 17);
+        window.Update(progress);
+        var canvas = window._canvas;
+        canvas.Width = window.Width; canvas.Height = window.Height;
+        canvas.Measure(new Size(window.Width, window.Height));
+        canvas.Arrange(new Rect(0, 0, window.Width, window.Height));
+        canvas.UpdateLayout();
+        var bitmap = new RenderTargetBitmap(window._windowRect.Width, window._windowRect.Height,
+            monitor.Dpi, monitor.Dpi, PixelFormats.Pbgra32);
+        bitmap.Render(canvas);
+        Core.Thumbnails.SavePng(bitmap, path);
+        window.Close();
     }
 
     private FlightWindow(BitmapSource image, RECT from, RECT to, double tilt, Display monitor, bool falling, double duration, Action? completion, int seed)
@@ -90,8 +144,32 @@ public sealed class FlightWindow : Window
 
         _shadow = new DropShadowEffect { Color = Colors.Black, Opacity = 0.24, BlurRadius = 20, ShadowDepth = 5, Direction = 270 };
         _glass = new Border { Background = Theme.Freeze(new SolidColorBrush(Theme.GlassFill)), Effect = _shadow };
+        if (!falling && CachedShadow)
+        {
+            _cachedShadow = new CachedFlightShadow(monitor.Dpi)
+            {
+                Margin = new Thickness(-CachedFlightShadow.Padding,5-CachedFlightShadow.Padding,
+                    -CachedFlightShadow.Padding,-5-CachedFlightShadow.Padding),
+            };
+            _glass.Effect = null;
+        }
         _photo = new Image { Source = image, Stretch = Stretch.Fill };
-        RenderOptions.SetBitmapScalingMode(_photo, BitmapScalingMode.HighQuality);
+        RenderOptions.SetBitmapScalingMode(_photo, !falling && FastResampling
+            ? BitmapScalingMode.LowQuality : BitmapScalingMode.HighQuality);
+        if (!falling && FixedPhotoLayer)
+        {
+            _photo.Width = _from.Width; _photo.Height = _from.Height;
+            _photo.CacheMode = new BitmapCache();
+            _photoLayer = new Canvas { Width = _from.Width, Height = _from.Height,
+                HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top,
+                Clip = _photoClip };
+            _photoLayer.Children.Add(_photo);
+            var transform = new TransformGroup();
+            transform.Children.Add(_photoScale); transform.Children.Add(_photoOffset);
+            _photoLayer.RenderTransform = transform;
+            _photoClip.Rect = new Rect(0, 0, _from.Width, _from.Height);
+            RenderOptions.SetBitmapScalingMode(_photoLayer, BitmapScalingMode.LowQuality);
+        }
         _edge = new Border
         {
             BorderThickness = new Thickness(0.75),
@@ -100,8 +178,9 @@ public sealed class FlightWindow : Window
         _clip = Pegs.Create(seed: seed, pinned: false);
         _clip.HorizontalAlignment = HorizontalAlignment.Left;
         _clip.VerticalAlignment = VerticalAlignment.Top;
+        if (_cachedShadow is not null) _container.Children.Add(_cachedShadow);
         _container.Children.Add(_glass);
-        _container.Children.Add(_photo);
+        _container.Children.Add((UIElement?)_photoLayer ?? _photo);
         _container.Children.Add(_edge);
         _container.Children.Add(_clip);
         _container.RenderTransform = _rotate;
@@ -109,14 +188,24 @@ public sealed class FlightWindow : Window
     }
 
     private readonly RECT _windowRect;
+    private IntPtr _ownHandle;
 
     protected override void OnSourceInitialized(EventArgs e)
     {
         base.OnSourceInitialized(e);
         var source = (HwndSource)PresentationSource.FromVisual(this)!;
+        _ownHandle=source.Handle;
         FullScreen.Own.Add(source.Handle);
         AddExStyle(source.Handle, WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT);
         SetWindowPos(source.Handle, HWND_TOPMOST, _windowRect.Left, _windowRect.Top, _windowRect.Width, _windowRect.Height, SWP_NOACTIVATE);
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        CompositionTarget.Rendering-=OnRendering;
+        Current.Remove(this);
+        if(_ownHandle!=IntPtr.Zero) FullScreen.Own.Remove(_ownHandle);
+        base.OnClosed(e);
     }
 
     private void Run()
@@ -124,15 +213,20 @@ public sealed class FlightWindow : Window
         if (_falling) { Update(1); UpdateFall(0); } else Update(0);
         Show();
         _clock.Start();
+        if (StatisticsSink is not null) _probe = new FlightProbe(_duration);
         CompositionTarget.Rendering += OnRendering;
     }
 
     private void OnRendering(object? sender, EventArgs e)
     {
+        _probe?.BeginFrame(e);
         double k = Math.Min(1, _clock.Elapsed.TotalSeconds / _duration);
         if (_falling) UpdateFall(k); else Update(k);
+        _probe?.RecordSurface(_windowRect.Width, _windowRect.Height);
+        _probe?.EndFrame();
         if (k < 1) return;
         CompositionTarget.Rendering -= OnRendering;
+        if (_probe is not null) StatisticsSink?.Invoke(_probe.Finish(_clock.Elapsed.TotalMilliseconds));
         _completion?.Invoke();
         Current.Remove(this);
         if (_falling)
@@ -141,8 +235,8 @@ public sealed class FlightWindow : Window
             return;
         }
         // The real card fades in underneath; this one fades out over it.
-        var fade = new System.Windows.Media.Animation.DoubleAnimation(0, TimeSpan.FromSeconds(0.16));
-        fade.Completed += (_, _) => Close();
+        var fade = new System.Windows.Media.Animation.DoubleAnimation(0, TimeSpan.FromSeconds(FadeDuration));
+        fade.Completed += (_, _) => { Close(); AnimationBenchmark.FlightClosed(); };
         BeginAnimation(OpacityProperty, fade);
     }
 
@@ -157,7 +251,7 @@ public sealed class FlightWindow : Window
 
     private void Update(double raw)
     {
-        double k = Ease.InOutCubic(raw);
+        double k = FlightEase(raw);
         double chrome = Ease.Smooth(k, 0.35, 1);
         double Lerp(double a, double b) => a + (b - a) * k;
 
@@ -172,6 +266,8 @@ public sealed class FlightWindow : Window
     private void Place(double topX, double topY, double w, double h, double angle, double radius, double inset, double chrome)
     {
         _container.Width = w; _container.Height = h;
+        if (!_falling && FastResampling)
+            RenderOptions.SetBitmapScalingMode(_photo, chrome >= 1 ? BitmapScalingMode.HighQuality : BitmapScalingMode.LowQuality);
         Canvas.SetLeft(_container, topX - w / 2);
         Canvas.SetTop(_container, topY);
         _rotate.CenterX = w / 2; _rotate.CenterY = 0;
@@ -182,13 +278,36 @@ public sealed class FlightWindow : Window
         _edge.CornerRadius = new CornerRadius(radius);
         _edge.Opacity = chrome;
         _shadow.Opacity = 0.24 * Math.Max(chrome, 0.35);
+        if (_cachedShadow is not null)
+        {
+            bool fits = w>=32 && h>=32;
+            _glass.Effect = fits ? null : _shadow;
+            _cachedShadow.Opacity = fits ? chrome*Math.Max(chrome,.35) : 0;
+            _cachedShadow.Radius = radius;
+        }
 
-        _photo.Margin = new Thickness(inset);
         double pr = Math.Max(0, radius - inset);
-        _photo.Clip = new RectangleGeometry(new Rect(0, 0, Math.Max(0, w - 2 * inset), Math.Max(0, h - 2 * inset)), pr, pr);
+        if (_photoLayer is not null)
+        {
+            // The image itself keeps a fixed layout and cached full-resolution pixels.
+            // Its parent's render transform and mask reproduce upstream's inset/rounding.
+            double sx = Math.Max(.00001, (w-2*inset)/_from.Width);
+            double sy = Math.Max(.00001, (h-2*inset)/_from.Height);
+            _photoScale.ScaleX = sx; _photoScale.ScaleY = sy;
+            _photoOffset.X = inset; _photoOffset.Y = inset;
+            _photoClip.RadiusX = pr/sx; _photoClip.RadiusY = pr/sy;
+            RenderOptions.SetBitmapScalingMode(_photoLayer,
+                chrome >= 1 ? BitmapScalingMode.HighQuality : BitmapScalingMode.LowQuality);
+        }
+        else
+        {
+            _photo.Margin = new Thickness(inset);
+            _photo.Clip = new RectangleGeometry(new Rect(0, 0, Math.Max(0, w - 2 * inset), Math.Max(0, h - 2 * inset)), pr, pr);
+        }
 
         // The clip grips the top edge: 26 points tall, 12 of them over the card.
         _clip.Margin = new Thickness(w / 2 - _clip.Width / 2, -(Layout.PinHeight - 12), 0, 0);
         _clip.Opacity = chrome;
     }
+
 }
