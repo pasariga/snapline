@@ -1,4 +1,4 @@
-name: Validate Windows release draft
+name: Render and verify Windows previews
 on:
   push:
     branches: [prepare-windows-draft]
@@ -111,9 +111,9 @@ jobs:
             (New-Font 27 Regular), $soft, 80, 227)
           $width = 1120
           $height = [int]($shelf.Height * $width / $shelf.Width)
-          $graphics.FillRectangle((New-Brush '#50639A'), 78, 308, ($width + 4), ($height + 4))
-          $graphics.DrawImage($shelf, 80, 310, $width, $height)
-          $graphics.DrawString('WINDOWS EDITION BY PASARIGA', (New-Font 18 Bold), $accent, 80, 583)
+          $graphics.FillRectangle((New-Brush '#50639A'), 78, 286, ($width + 4), ($height + 4))
+          $graphics.DrawImage($shelf, 80, 288, $width, $height)
+          $graphics.DrawString('WINDOWS EDITION BY PASARIGA', (New-Font 18 Bold), $accent, 80, 586)
           $jpeg = [Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() |
             Where-Object MimeType -eq 'image/jpeg' | Select-Object -First 1
           $options = [Drawing.Imaging.EncoderParameters]::new(1)
@@ -137,48 +137,3 @@ jobs:
             }
             Write-Host '::endgroup::'
           }
-
-  draft:
-    needs: verify
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    if: github.repository == 'pasariga/snapline' && github.ref == 'refs/heads/prepare-windows-draft'
-    permissions:
-      actions: read
-      contents: write
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          ref: ${{ env.SOURCE_SHA }}
-          persist-credentials: false
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: Snapline-Windows-x64
-          run-id: ${{ env.PACKAGE_RUN }}
-          github-token: ${{ github.token }}
-          path: candidate
-      - name: Save verified packages in an unpublished draft
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          checksums=$(find candidate -type f -name SHA256SUMS.txt)
-          cd "$(dirname "$checksums")"
-          sed 's/\r$//' SHA256SUMS.txt | sha256sum --strict -c -
-          setup="Snapline-$RELEASE_VERSION-win-x64-Setup.exe"
-          portable="Snapline-$RELEASE_VERSION-win-x64-Portable.exe"
-          test -s "$setup" && test -s "$portable"
-          notes="$RUNNER_TEMP/snapline-release-notes.md"
-          cp "$GITHUB_WORKSPACE/docs/RELEASE-NOTES.md" "$notes"
-          cat >> "$notes" <<'DRAFT_NOTE'
-
-          **Draft acceptance / 草稿验收**  
-          Final desktop capture, drag-and-drop, and recording checks are pending.  
-          实际桌面截图、拖放和录屏验收待完成。
-          DRAFT_NOTE
-          gh release create "v$RELEASE_VERSION" "$setup" "$portable" SHA256SUMS.txt \
-            --repo "$GITHUB_REPOSITORY" --target "$SOURCE_SHA" --draft --prerelease --latest=false \
-            --title "Snapline Windows $RELEASE_VERSION" --notes-file "$notes"
-          gh release view "v$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" \
-            --json isDraft,isPrerelease,assets,url,tagName,targetCommitish
-          test "$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/v$RELEASE_VERSION" --jq length)" -eq 0
