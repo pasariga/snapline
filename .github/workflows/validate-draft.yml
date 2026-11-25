@@ -1,65 +1,129 @@
-name: Reverify original Windows release candidate
+name: Verify the corrected Windows candidate and prepare draft
 on:
   push:
     branches: [prepare-windows-draft]
+
 permissions:
-  actions: read
   contents: read
 
+env:
+  SOURCE_SHA: 97a9a253fa11572e4f8c72e64e734c3c20dc100e
+  PACKAGE_RUN: '45568747793'
+  RELEASE_VERSION: 1.6.2-windows.2
+
 jobs:
-  verify-original:
+  verify:
     runs-on: windows-2025
     timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: Snapline-Windows-x64
-          run-id: '45564015702'
+          run-id: ${{ env.PACKAGE_RUN }}
           github-token: ${{ github.token }}
-          path: original
+          path: candidate
 
-      - name: Verify bytes against the original draft asset digests and build commit
+      - name: Verify new package hashes, embedded source commit and diagnostics
         shell: pwsh
+        run: |
+          function Test-Package([string] $Root, [string] $Version, [string] $SourceCommit) {
+            $checksum = Get-ChildItem -Path $Root -Filter SHA256SUMS.txt -Recurse -File
+            if (@($checksum).Count -ne 1) { throw "Missing or ambiguous checksums in $Root" }
+            $expectedFiles = @(
+              "Snapline-$Version-win-x64-Setup.exe"
+              "Snapline-$Version-win-x64-Portable.exe"
+            ) | Sort-Object
+            $sums = @(Get-Content -LiteralPath $checksum.FullName)
+            $records = foreach ($entry in $sums) {
+              if ($entry -notmatch '^([0-9a-f]{64})  (.+)$') { throw "Invalid checksum record in $Root" }
+              [pscustomobject]@{ Hash = $Matches[1]; Name = $Matches[2] }
+            }
+            if (@($records).Count -ne 2 -or
+                (($records.Name | Sort-Object) -join '|') -cne ($expectedFiles -join '|')) {
+              throw "Unexpected checksum file list for $Version"
+            }
+            foreach ($record in $records) {
+              $file = Get-Item -LiteralPath (Join-Path $checksum.DirectoryName $record.Name)
+              $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+              if ($hash -cne $record.Hash) { throw "SHA-256 mismatch for $($file.Name)" }
+              Write-Host "$($file.Name) $($file.Length) bytes SHA256=$hash"
+            }
+            $portable = Get-Item -LiteralPath (Join-Path $checksum.DirectoryName "Snapline-$Version-win-x64-Portable.exe")
+            $productVersion = $portable.VersionInfo.ProductVersion
+            if ($productVersion -cne "$Version+$SourceCommit") {
+              throw "Unexpected portable ProductVersion $productVersion"
+            }
+            Write-Host "Verified embedded ProductVersion $productVersion"
+            return $portable.FullName
+          }
+
+          $exe = Test-Package 'candidate' $env:RELEASE_VERSION $env:SOURCE_SHA
+          $dir = Join-Path $env:RUNNER_TEMP 'snapline-release-diagnostics'
+          New-Item -ItemType Directory -Path $dir -Force | Out-Null
+          $env:SNAPLINE_TEST_PROFILE = Join-Path $dir 'profile'
+
+          function Invoke-Diagnostic([string[]] $Arguments) {
+            $proc = Start-Process -FilePath $exe -ArgumentList $Arguments -WindowStyle Hidden -PassThru
+            if (!$proc.WaitForExit(90000)) {
+              Stop-Process -Id $proc.Id
+              throw "Timed out running $($Arguments[0])"
+            }
+            if ($proc.ExitCode -ne 0) { throw "$($Arguments[0]) returned $($proc.ExitCode)" }
+          }
+
+          $behavior = Join-Path $dir 'behavior.json'
+          Invoke-Diagnostic @('--session-selftest', ('"{0}"' -f $behavior))
+          $report = Get-Content -LiteralPath $behavior -Raw | ConvertFrom-Json
+          if (!$report.Passed -or $report.Checks.Count -lt 20) { throw 'Behavior diagnostic failed.' }
+          Write-Host "Passed $($report.Checks.Count) synthetic behavior checks."
+
+          $markup = Join-Path $dir 'markup.png'
+          Copy-Item -LiteralPath (Join-Path $dir 'managed-capture.png') -Destination $markup
+          Invoke-Diagnostic @('--markup-test', ('"{0}"' -f $markup))
+          Write-Host 'Markup save, undo, and image dimensions self-test passed.'
+
+  draft:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.repository == 'pasariga/snapline' && github.ref == 'refs/heads/prepare-windows-draft'
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: Snapline-Windows-x64
+          run-id: ${{ env.PACKAGE_RUN }}
+          github-token: ${{ github.token }}
+          path: candidate
+      - name: Create a new draft without changing the previous candidate
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $version = '1.6.2-windows.1'
-          $source = 'f7ee98d3f3f9c79cc965642a3bb077318b4f5b26'
-          $portableName = "Snapline-$version-win-x64-Portable.exe"
-          $sums = @{
-            'SHA256SUMS.txt' = 'dd2e1784d9a5930eb3efd047ab14004811dda6d64a65f25a8f71dfb10121c2ba'
-            "Snapline-$version-win-x64-Setup.exe" = '6c70dd2b562ad0222e48ea3b4c5b0136ef29caf779cda40e05cfd647dd110a18'
-            $portableName = 'cae53306d1264d2183b68433ab771342999d80024d089cc6e9adbd4a0ab6d855'
-          }
-
-          function Assert-Package([string] $Root) {
-            foreach ($file in $sums.Keys) {
-              $match = @(Get-ChildItem -Path $Root -Filter $file -Recurse -File)
-              if ($match.Count -ne 1) { throw "Package missing or ambiguous: $file" }
-              $hash = (Get-FileHash -LiteralPath $match[0].FullName -Algorithm SHA256).Hash
-              if ($hash -ne $sums[$file]) { throw "Draft digest mismatch: $file" }
-              Write-Host "$file $($match[0].Length) bytes SHA256=$hash"
-            }
-            $portable = Get-ChildItem -Path $Root -Filter $portableName -Recurse -File
-            $actual = $portable.VersionInfo.ProductVersion
-            if ($actual -cne "$version+$source") { throw "Unexpected ProductVersion: $actual" }
-            Write-Host "Embedded ProductVersion: $actual"
-            $manifest = Get-ChildItem -Path $Root -Filter SHA256SUMS.txt -Recurse -File
-            $entries = @(Get-Content -LiteralPath $manifest.FullName)
-            if ($entries.Count -ne 2) { throw 'Expected two checksum entries.' }
-            foreach ($line in $entries) {
-              $hash, $name = $line -split '  ', 2
-              if (!$sums.ContainsKey($name) -or $hash -ne $sums[$name]) {
-                throw "Checksum manifest mismatch: $name"
-              }
-            }
-          }
-          Assert-Package 'original'
-          $fromDraft = Join-Path $env:RUNNER_TEMP 'original-release-attachments'
-          gh release download "v$version" --repo $env:GITHUB_REPOSITORY --dir $fromDraft
-          if ($LASTEXITCODE -eq 0) {
-            Assert-Package $fromDraft
-            Write-Host 'Downloaded release attachments independently matched the build artifact.'
-          } else {
-            Write-Host 'Draft attachment access unavailable with read-only token. Compared build bytes against the independently recorded API digests.'
-          }
+          checksums=$(find candidate -type f -name SHA256SUMS.txt)
+          cd "$(dirname "$checksums")"
+          sed 's/\r$//' SHA256SUMS.txt | sha256sum --strict -c -
+          setup="Snapline-$RELEASE_VERSION-win-x64-Setup.exe"
+          portable="Snapline-$RELEASE_VERSION-win-x64-Portable.exe"
+          test -s "$setup" && test -s "$portable"
+          notes="$RUNNER_TEMP/snapline-release-notes.md"
+          cp "$GITHUB_WORKSPACE/docs/RELEASE-NOTES.md" "$notes"
+          printf '\n**Source commit / 构建源码** [%s](https://github.com/%s/commit/%s) · [Windows CI](https://github.com/%s/actions/runs/%s)\n' \
+            "$SOURCE_SHA" "$GITHUB_REPOSITORY" "$SOURCE_SHA" "$GITHUB_REPOSITORY" "$PACKAGE_RUN" >> "$notes"
+          printf '\n**Pending / 待验收** Native Windows screenshot capture, drag-and-drop to another app, and the real desktop recording.\n\n仍需验证 Windows 原生截图、拖入第三方应用和真实桌面录屏。\n' >> "$notes"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/v$RELEASE_VERSION" --jq length)" -eq 0
+          gh release create "v$RELEASE_VERSION" "$setup" "$portable" SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY" --target "$SOURCE_SHA" --draft --prerelease --latest=false \
+            --title "Snapline Windows $RELEASE_VERSION" --notes-file "$notes"
+          gh release view "v$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" \
+            --json isDraft,isPrerelease,assets,url,tagName,targetCommitish
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/v$RELEASE_VERSION" --jq length)" -eq 0
