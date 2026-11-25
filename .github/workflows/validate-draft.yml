@@ -1,7 +1,6 @@
-name: Verify the corrected Windows candidate and prepare draft
+name: Reverify the Windows candidate
 on:
-  push:
-    branches: [prepare-windows-draft]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -84,46 +83,3 @@ jobs:
           Copy-Item -LiteralPath (Join-Path $dir 'managed-capture.png') -Destination $markup
           Invoke-Diagnostic @('--markup-test', ('"{0}"' -f $markup))
           Write-Host 'Markup save, undo, and image dimensions self-test passed.'
-
-  draft:
-    needs: verify
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    if: github.repository == 'pasariga/snapline' && github.ref == 'refs/heads/prepare-windows-draft'
-    permissions:
-      actions: read
-      contents: write
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          ref: ${{ env.SOURCE_SHA }}
-          persist-credentials: false
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: Snapline-Windows-x64
-          run-id: ${{ env.PACKAGE_RUN }}
-          github-token: ${{ github.token }}
-          path: candidate
-      - name: Create a new draft without changing the previous candidate
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          checksums=$(find candidate -type f -name SHA256SUMS.txt)
-          cd "$(dirname "$checksums")"
-          sed 's/\r$//' SHA256SUMS.txt | sha256sum --strict -c -
-          setup="Snapline-$RELEASE_VERSION-win-x64-Setup.exe"
-          portable="Snapline-$RELEASE_VERSION-win-x64-Portable.exe"
-          test -s "$setup" && test -s "$portable"
-          notes="$RUNNER_TEMP/snapline-release-notes.md"
-          cp "$GITHUB_WORKSPACE/docs/RELEASE-NOTES.md" "$notes"
-          printf '\n**Source commit / 构建源码** [%s](https://github.com/%s/commit/%s) · [Windows CI](https://github.com/%s/actions/runs/%s)\n' \
-            "$SOURCE_SHA" "$GITHUB_REPOSITORY" "$SOURCE_SHA" "$GITHUB_REPOSITORY" "$PACKAGE_RUN" >> "$notes"
-          printf '\n**Pending / 待验收** Native Windows screenshot capture, drag-and-drop to another app, and the real desktop recording.\n\n仍需验证 Windows 原生截图、拖入第三方应用和真实桌面录屏。\n' >> "$notes"
-          test "$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/v$RELEASE_VERSION" --jq length)" -eq 0
-          gh release create "v$RELEASE_VERSION" "$setup" "$portable" SHA256SUMS.txt \
-            --repo "$GITHUB_REPOSITORY" --target "$SOURCE_SHA" --draft --prerelease --latest=false \
-            --title "Snapline Windows $RELEASE_VERSION" --notes-file "$notes"
-          gh release view "v$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" \
-            --json isDraft,isPrerelease,assets,url,tagName,targetCommitish
-          test "$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/v$RELEASE_VERSION" --jq length)" -eq 0
