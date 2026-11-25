@@ -25,9 +25,21 @@ dotnet publish src/Snapline/Snapline.csproj -c Release -r win-x64 --self-contain
 ```
 
 Exit another running Snapline before starting a new normal build. Normal builds
-use the existing LocalAppData/Snapline settings. Back that directory up before
-testing new capture lifecycle changes. Do not commit personal screenshots or
+use the Windows edition’s %LOCALAPPDATA%\\Snapline Windows settings. The
+upstream and previous local builds use a separate %LOCALAPPDATA%\\Snapline folder. Do not commit personal screenshots or
 settings. There are no API keys or server-side components required.
+
+## Build Windows x64 release files
+
+With Inno Setup 6 and the .NET 8 SDK, run `.\scripts\build.ps1 -Installer` from
+the repository root. The Setup, self-contained Portable and SHA-256 files
+appear under `dist/release/<version>`. The version is taken from
+`Snapline.csproj` unless `-Version` is provided.
+
+GitHub Actions builds downloadable candidates with a read-only token. To
+prepare a release, use the artifacts for the selected commit, verify
+`SHA256SUMS.txt`, and create a draft with [the bilingual release notes](docs/RELEASE-NOTES.md).
+Do not publish while acceptance testing is pending.
 
 ## Isolated regression checks
 

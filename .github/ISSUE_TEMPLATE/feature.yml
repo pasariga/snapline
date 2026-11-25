@@ -1,0 +1,21 @@
+name: Feature request / 功能建议
+description: Suggest a workflow improvement for the Windows edition.
+title: "[Feature] "
+body:
+  - type: textarea
+    id: workflow
+    attributes:
+      label: What are you trying to do? / 你想完成什么操作？
+      description: Describe your workflow and where you get stuck.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would help? / 你希望怎样改进？
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Current workaround / 你目前的做法

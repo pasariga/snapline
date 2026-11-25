@@ -1,0 +1,29 @@
+name: Bug report / 问题反馈
+description: Report an issue in the Snapline Windows edition.
+title: "[Bug] "
+body:
+  - type: input
+    id: versions
+    attributes:
+      label: Snapline and Windows versions / 软件与系统版本
+      placeholder: "Example: 1.6.2-windows.1, Windows 11 24H2 x64"
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce / 复现步骤
+      description: Include the capture method, display scaling, or affected app if relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: What happened and what did you expect? / 实际与预期结果
+    validations:
+      required: true
+  - type: textarea
+    id: examples
+    attributes:
+      label: Optional example / 可选示例
+      description: Use sample data. Remove private images, local paths, credentials, and account names before posting.
