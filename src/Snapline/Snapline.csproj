@@ -16,7 +16,7 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
-    <Version>1.6.2-windows.1</Version>
+    <Version>1.6.2-windows.2</Version>
     <Product>Snapline</Product>
     <Authors>Snapline</Authors>
     <Description>Screenshots, hung out to dry. A clothesline for your screenshots along the top of the screen.</Description>

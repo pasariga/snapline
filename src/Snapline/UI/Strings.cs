@@ -110,7 +110,7 @@ public static class Strings
     public static string SectionCaptures => L("Captures");
     public static string SectionGeneral => L("General");
     public static string Shortcut => L("Show or hide the line");
-    public static string ShortcutTip => L("Click here and press the keys you want, like Ctrl+Alt+T");
+    public static string ShortcutTip => L("Click here and press the keys you want, like Ctrl+Alt+Shift+T");
     public static string LineDistance => L("Distance from the top of the screen");
     public static string LineDistanceTip => L("You can also drag the line itself up or down");
     public static string RopeColor => L("Line colour");
@@ -223,7 +223,7 @@ public static class Strings
         ["Captures"] = "اللقطات",
         ["General"] = "عام",
         ["Show or hide the line"] = "إظهار الحبل أو إخفاؤه",
-        ["Click here and press the keys you want, like Ctrl+Alt+T"] = "انقر هنا واضغط المفاتيح التي تريدها، مثل Ctrl+Alt+T",
+        ["Click here and press the keys you want, like Ctrl+Alt+Shift+T"] = "انقر هنا واضغط المفاتيح التي تريدها، مثل Ctrl+Alt+Shift+T",
         ["Distance from the top of the screen"] = "المسافة من أعلى الشاشة",
         ["You can also drag the line itself up or down"] = "يمكنك أيضًا سحب الحبل نفسه للأعلى أو للأسفل",
         ["Line colour"] = "لون الحبل",

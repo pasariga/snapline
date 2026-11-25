@@ -27,7 +27,7 @@ jobs:
         shell: pwsh
         run: .\scripts\build.ps1 -Installer
 
-      - name: Smoke test portable, installer, and uninstaller
+      - name: Smoke test portable, installer, startup and uninstaller
         shell: pwsh
         run: |
           $version = ([xml](Get-Content src/Snapline/Snapline.csproj -Raw)).Project.PropertyGroup.Version |
@@ -46,12 +46,25 @@ jobs:
             }
           }
 
+          # Use test data and a legacy startup marker on the disposable runner.
+          $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+          if (!(Test-Path -LiteralPath $runKey)) { New-Item -Path $runKey | Out-Null }
+          $legacyCommand = '"C:\SnaplineLegacySmoke\Snapline.exe"'
+          Set-ItemProperty -Path $runKey -Name 'Snapline' -Value $legacyCommand
+          $savedCapture = Join-Path $env:RUNNER_TEMP 'snapline-saved-capture.png'
+          Copy-Item 'docs/samples/document.png' -Destination $savedCapture
+          $captureHash = (Get-FileHash -LiteralPath $savedCapture).Hash
+
           $install = Start-Process -FilePath $setup -ArgumentList @(
-            '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/TASKS=""', ('/DIR="{0}"' -f $testDir)
+            '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/TASKS=startup', ('/DIR="{0}"' -f $testDir)
           ) -PassThru -Wait
           if ($install.ExitCode -ne 0) { throw "Installer exited with $($install.ExitCode)" }
 
           $installed = Join-Path $testDir 'Snapline.exe'
+          if ((Get-ItemPropertyValue -Path $runKey -Name 'SnaplineWindows') -ne ('"{0}"' -f $installed) -or
+              (Get-ItemPropertyValue -Path $runKey -Name 'Snapline') -ne $legacyCommand) {
+            throw 'Installer did not isolate the Windows edition startup entry.'
+          }
           if ((Get-FileHash -LiteralPath $installed).Hash -ne (Get-FileHash -LiteralPath $portable).Hash) {
             throw 'The installed executable and portable executable differ.'
           }
@@ -59,20 +72,40 @@ jobs:
             throw 'Installed licenses are missing.'
           }
 
-          foreach ($exe in $portable, $installed) {
-            $env:SNAPLINE_TEST_PROFILE = 'SnaplineWindowsCi-' + [IO.Path]::GetFileNameWithoutExtension($exe)
-            $process = Start-Process -FilePath $exe -PassThru
-            try {
-              if ($process.WaitForExit(6000)) { throw "$exe exited early with $($process.ExitCode)" }
-              $log = Join-Path $env:LOCALAPPDATA "$env:SNAPLINE_TEST_PROFILE\log.txt"
-              if (!(Test-Path -LiteralPath $log) -or
-                  !(Select-String -LiteralPath $log -SimpleMatch 'Watching ' -Quiet) -or
-                  (Select-String -LiteralPath $log -SimpleMatch 'Could not start:' -Quiet)) {
-                throw 'Snapline reported a startup failure.'
+          # Hold the legacy shortcut while launching the candidate. Win32 hotkeys are system-wide.
+          Add-Type @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class SmokeHotKey
+          {
+              [DllImport("user32.dll", SetLastError = true)]
+              public static extern bool RegisterHotKey(IntPtr hwnd, int id, uint modifiers, uint key);
+              [DllImport("user32.dll")]
+              public static extern bool UnregisterHotKey(IntPtr hwnd, int id);
+          }
+          '@
+          if (![SmokeHotKey]::RegisterHotKey([IntPtr]::Zero, 1, 3, 0x54)) {
+            throw 'Could not reserve the legacy Ctrl+Alt+T shortcut for the smoke test.'
+          }
+
+          try {
+            foreach ($exe in $portable, $installed) {
+              $env:SNAPLINE_TEST_PROFILE = 'SnaplineWindowsCi-' + [IO.Path]::GetFileNameWithoutExtension($exe)
+              $process = Start-Process -FilePath $exe -WindowStyle Hidden -PassThru
+              try {
+                if ($process.WaitForExit(6000)) { throw "$exe exited early with $($process.ExitCode)" }
+                $log = Join-Path $env:LOCALAPPDATA "$env:SNAPLINE_TEST_PROFILE\log.txt"
+                if (!(Test-Path -LiteralPath $log) -or
+                    !(Select-String -LiteralPath $log -SimpleMatch 'Watching ' -Quiet) -or
+                    (Select-String -LiteralPath $log -SimpleMatch 'Could not start:', 'Could not register the shortcut' -Quiet)) {
+                  throw 'Snapline reported a startup or hotkey registration failure.'
+                }
+              } finally {
+                if (!$process.HasExited) { Stop-Process -Id $process.Id -ErrorAction Stop; $process.WaitForExit() }
               }
-            } finally {
-              if (!$process.HasExited) { Stop-Process -Id $process.Id -ErrorAction Stop; $process.WaitForExit() }
             }
+          } finally {
+            [SmokeHotKey]::UnregisterHotKey([IntPtr]::Zero, 1) | Out-Null
           }
 
           $uninstall = Start-Process -FilePath (Join-Path $testDir 'unins000.exe') -ArgumentList @(
@@ -80,6 +113,11 @@ jobs:
           ) -PassThru -Wait
           if ($uninstall.ExitCode -ne 0 -or (Test-Path -LiteralPath $installed)) {
             throw "Uninstall failed with code $($uninstall.ExitCode)"
+          }
+          if ((Get-ItemPropertyValue -Path $runKey -Name 'SnaplineWindows' -ErrorAction SilentlyContinue) -or
+              (Get-ItemPropertyValue -Path $runKey -Name 'Snapline') -ne $legacyCommand -or
+              (Get-FileHash -LiteralPath $savedCapture).Hash -ne $captureHash) {
+            throw 'Uninstall failed to remove only its own startup entry or preserve the saved capture.'
           }
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

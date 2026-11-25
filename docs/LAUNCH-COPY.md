@@ -1,6 +1,6 @@
 # Snapline launch copy
 
-Publish these only once the Windows release is public. Check each community’s current rules and flair before posting. The sample posts disclose that the author maintains this edition. The Bilibili copy is for footage recorded from the Windows build.
+Publish these only once the Windows release is public. Check each community’s current rules and flair before posting. The sample posts disclose that the author maintains this edition. Publish the Bilibili post with footage recorded from the accepted Windows build and describe only the actions visible in the video.
 
 ## Reddit
 
@@ -23,20 +23,13 @@ I’d be interested to hear which apps you drag screenshots into most often.
 
 ## V2EX
 
-**标题**  
-分享一下我改的 Windows 截图晾衣杆 Snapline，截完就能拖进正在用的应用
+V2EX 的[社区规则](https://www.v2ex.com/about/index.html)要求不要发布 AI 生成内容。这里保留作者亲写时可核对的事实。
 
-**正文**  
-平时写实验报告或者给同学发图，截完后经常要再去翻截图文件夹。Snapline 的做法是把新截图挂在桌面顶边，鼠标移过去就能找到。单击复制，按住标注，或者直接拖到支持图片拖拽的应用里。它也能挂便签、用 Windows OCR 提取文字。
-
-这是我基于 Mohammed Abu Jubara 的 Snapline（源自 Tendedero）维护的 Windows 修改版。主要改了截图飞入和面板动画，以及自动收起的时机。拖图、标注、开菜单时，晾衣杆会等你操作完再计时。
-
-项目免费、MIT 开源，带 Windows x64 安装版和便携版。晾衣杆适合放手头要用的图，跨日期或重新登录时会清空，重要截图记得另存。
-
-项目：https://github.com/pasariga/snapline  
-下载：https://github.com/pasariga/snapline/releases
-
-欢迎在 Issues 里反馈你常用的截图工具和拖拽目标，方便我复现。
+- 写实验报告或给同学发图时，截图之后怎样从晾衣杆找到并拖走这一张。
+- 说明项目基于 Mohammed Abu Jubara 的 Snapline，概念源自 Alejandro Buján Pampín 的 Tendedero。
+- 用自己实际验收过的例子讲清 Windows 修改版的飞入动画、交互中的暂停收起和离开后的延时。
+- 写清 Windows x64 安装版与便携版、MIT 授权和截图的保留规则。
+- 发帖时附 [项目](https://github.com/pasariga/snapline)、[已公开的下载页](https://github.com/pasariga/snapline/releases)和 [Issues](https://github.com/pasariga/snapline/issues)，邀请读者反馈实际拖放场景。
 
 ## 小红书
 

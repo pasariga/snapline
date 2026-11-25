@@ -97,7 +97,7 @@ public sealed class Settings
     /// <summary>auto, en or ar.</summary>
     public string Language { get; set; } = "auto";
     public bool Welcomed { get; set; }
-    public string HotKey { get; set; } = "Ctrl+Alt+T";
+    public string HotKey { get; set; } = "Ctrl+Alt+Shift+T";
     public double AutoHideDelay { get; set; } = 2.5;
     public bool CompactFlightPreview { get; set; }
     public string? CaptureSessionKey { get; set; }

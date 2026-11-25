@@ -37,7 +37,7 @@ See the [Windows implementation notes](docs/WINDOWS-CHANGES.md) for the original
 
 1. Open [Windows downloads](https://github.com/pasariga/snapline/releases). Pick **Setup.exe** for Start Menu and uninstall entries, or **Portable.exe** to run without setup. Both Windows x64 builds include the .NET runtime. If no release is listed yet, [build from source](LOCAL-DEVELOPMENT.md).
 2. Launch Snapline from Start or the portable file. It runs in the notification area.
-3. Take a snip with **Win+Shift+S**, then hover at the top edge to reveal the shelf. You can also click the tray icon or press **Ctrl+Alt+T**.
+3. Take a snip with **Win+Shift+S**, then hover at the top edge to reveal the shelf. You can also click the tray icon or press **Ctrl+Alt+Shift+T**.
 4. Click to copy, hold to annotate, double-click to open, or drag a screenshot where you want it.
 
 The Windows edition targets Windows 11 and Windows 10 x64 (version 1809 or later). The packages are unsigned, so Windows may show an unknown-publisher or SmartScreen prompt. Release notes list the files and how to check their SHA-256 hashes.
@@ -52,9 +52,9 @@ Capture handling and OCR run locally. The app requires no account or API key. Se
 
 | Question | Answer |
 | --- | --- |
-| Why didn’t my screenshot appear? | Check **Catch clipboard captures** in Settings, or add your capture tool’s save folder to the watch list. Use the tray icon or **Ctrl+Alt+T** if top-edge reveal is off. |
+| Why didn’t my screenshot appear? | Check **Catch clipboard captures** in Settings, or add your capture tool’s save folder to the watch list. Use the tray icon or **Ctrl+Alt+Shift+T** if top-edge reveal is off. |
 | Does the animation reduce screenshot quality? | Animation uses a separate preview. Copy and open use the source image, and annotation can restore the original. |
-| Can I keep my existing Snapline installation? | Yes. This edition has its own install entry and data folder. Existing settings are left in their original folder. Run one edition at a time to avoid competing for the same hotkey and clipboard events. |
+| Can I keep my existing Snapline installation? | Yes. This edition has its own install entry and data folder. Existing settings are left in their original folder. The Windows edition defaults to **Ctrl+Alt+Shift+T**. If you tested the earlier candidate, set that shortcut in Settings before running both editions. Keep clipboard capture enabled in just one edition to avoid duplicate cards. |
 | Is the interface available in Chinese? | The repository docs are bilingual. The app currently offers English and Arabic. |
 | What about macOS? | The repository retains upstream macOS source. This edition prepares Windows x64 packages. |
 
