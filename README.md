@@ -11,9 +11,9 @@
   · <a href="#get-started">Quick start</a> · <a href="https://github.com/pasariga/snapline/issues/new/choose">Feedback</a>
 </p>
 
-![Screenshot cards hanging from Snapline's desktop clothesline](docs/hero-light.png)
+![Three sample screenshots on the Snapline Windows shelf, with the Clear all button at the right](docs/windows-shelf.jpg)
 
-*Snapline interface artwork from the upstream project. [Watch the upstream demo](docs/demo.mp4).*
+*Rendered by this Windows edition using sample images. [Watch the upstream demo](docs/demo.mp4).*
 
 Say you’re writing a bug report, collecting slides from a lecture, or grabbing a reference for a chat. Snapline hangs each new capture on a clothesline at the top of your screen. Move your pointer to the top edge to bring it back, then copy or drag the screenshot straight into the app you’re using.
 

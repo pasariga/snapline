@@ -3,7 +3,7 @@
 <h1 align="center">Snapline</h1>
 <p align="center"><strong>把截图挂在桌面顶部，随手就能用。</strong><br>截图后直接复制、标注或拖进正在用的应用。</p>
 <p align="center">
-  <a href="https://github.com/pasariga/snapline/releases"><img src="https://img.shields.io/badge/Windows_x64-下载-2d5be3?style=for-the-badge" alt="Windows x64 下载"></a>
+  <a href="https://github.com/pasariga/snapline/releases"><img src="https://img.shields.io/badge/Windows_x64-%E4%B8%8B%E8%BD%BD-2d5be3?style=for-the-badge" alt="Windows x64 下载"></a>
 </p>
 <p align="center">
   <a href="https://github.com/pasariga/snapline/actions/workflows/release.yml"><img src="https://github.com/pasariga/snapline/actions/workflows/release.yml/badge.svg?branch=main" alt="Windows 构建状态"></a>
@@ -11,9 +11,9 @@
   · <a href="#快速上手">快速上手</a> · <a href="https://github.com/pasariga/snapline/issues/new/choose">问题反馈</a>
 </p>
 
-![Snapline 的桌面晾衣杆上挂着多张截图](docs/hero-light.png)
+![Windows 版 Snapline 晾衣杆上挂着三张示例图，右侧显示清空按钮](docs/windows-shelf.jpg)
 
-*界面图来自上游 Snapline。[观看上游演示](docs/demo.mp4)。*
+*由本 Windows 修改版使用示例图渲染。[观看上游演示](docs/demo.mp4)。*
 
 上课截了几页课件，写报告要贴图，或者聊天时想发刚刚截到的画面？Snapline 会把新截图自动挂到桌面顶部的“晾衣杆”上。把鼠标移到屏幕顶边，截图就能随手复制或拖走，少开一次资源管理器。
 
