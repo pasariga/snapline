@@ -55,15 +55,24 @@ jobs:
           Copy-Item 'docs/samples/document.png' -Destination $savedCapture
           $captureHash = (Get-FileHash -LiteralPath $savedCapture).Hash
 
-          $install = Start-Process -FilePath $setup -ArgumentList @(
-            '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/TASKS=startup', ('/DIR="{0}"' -f $testDir)
+          $installLog = Join-Path $env:RUNNER_TEMP 'snapline-setup.log'
+          $install = Start-Process -FilePath $setup -WindowStyle Hidden -ArgumentList @(
+            '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/MERGETASKS="startup"',
+            ('/DIR="{0}"' -f $testDir), ('/LOG="{0}"' -f $installLog)
           ) -PassThru -Wait
+          if (Test-Path -LiteralPath $installLog) {
+            Select-String -LiteralPath $installLog -Pattern 'Command line|HKEY_CURRENT_USER|SnaplineWindows|registry entry|Additional tasks|Startup|completed successfully'
+          }
           if ($install.ExitCode -ne 0) { throw "Installer exited with $($install.ExitCode)" }
 
           $installed = Join-Path $testDir 'Snapline.exe'
-          if ((Get-ItemPropertyValue -Path $runKey -Name 'SnaplineWindows') -ne ('"{0}"' -f $installed) -or
+          if ((Get-ItemPropertyValue -Path $runKey -Name 'SnaplineWindows' -ErrorAction SilentlyContinue) -ne ('"{0}"' -f $installed) -or
               (Get-ItemPropertyValue -Path $runKey -Name 'Snapline') -ne $legacyCommand) {
             throw 'Installer did not isolate the Windows edition startup entry.'
+          }
+          $releaseKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{A18943D2-808C-47D6-8F51-299925DCE31C}_is1'
+          if ((Get-ItemPropertyValue -Path $releaseKey -Name 'DisplayVersion') -ne $version) {
+            throw 'Windows uninstall entry reports the wrong version.'
           }
           if ((Get-FileHash -LiteralPath $installed).Hash -ne (Get-FileHash -LiteralPath $portable).Hash) {
             throw 'The installed executable and portable executable differ.'
