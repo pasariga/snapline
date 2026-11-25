@@ -1,35 +1,56 @@
-# Builds Snapline into dist\.
-#   scripts\build.ps1            framework-dependent single file (needs the .NET 8 Desktop Runtime), ~25 MB
-#   scripts\build.ps1 -Portable  self-contained single file, runs anywhere, ~70 MB
+# Builds Snapline into dist\. -Installer also creates both Windows release executables and SHA-256 sums.
 param([switch]$Portable, [switch]$Installer, [string]$Version)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $proj = Join-Path $root 'src\Snapline\Snapline.csproj'
 $dist = Join-Path $root 'dist'
 
+if (-not $Version) {
+    $Version = ([xml](Get-Content -LiteralPath $proj -Raw)).Project.PropertyGroup.Version |
+        Select-Object -First 1
+}
+if ($Version -cnotmatch '^\d+\.\d+\.\d+(?:-[a-z0-9]+(?:[.-][a-z0-9]+)*)?$') {
+    throw "Expected a version such as 1.6.2-windows.1. Got '$Version'."
+}
+
 if (-not (Test-Path (Join-Path $root 'src\Snapline\Assets\Snapline.ico'))) {
     & (Join-Path $PSScriptRoot 'make-brand.ps1')
 }
 
-if ($Installer -and -not $Portable) { $Portable = $true }
+if ($Installer) { $Portable = $true }
 $outDir = if ($Portable) { Join-Path $dist 'portable' } else { Join-Path $dist 'win-x64' }
-$args = @('publish', $proj, '-c', 'Release', '-r', 'win-x64', '-o', $outDir,
-          '-p:PublishSingleFile=true', '-p:IncludeNativeLibrariesForSelfExtract=true', '-p:DebugType=none')
-$args += if ($Portable) { '--self-contained', 'true', '-p:EnableCompressionInSingleFile=true' } else { '--self-contained', 'false' }
-# The version from the release tag goes into the exe's own properties too.
-if ($Version -and $Version -ne '0.0.0') { $args += "-p:Version=$Version" }
-dotnet @args
+$publishArgs = @('publish', $proj, '-c', 'Release', '-r', 'win-x64', '-o', $outDir,
+    '-p:PublishSingleFile=true', '-p:IncludeNativeLibrariesForSelfExtract=true', '-p:DebugType=none',
+    "-p:Version=$Version")
+$publishArgs += if ($Portable) { '--self-contained', 'true', '-p:EnableCompressionInSingleFile=true' }
+                else { '--self-contained', 'false' }
+dotnet @publishArgs
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-Write-Host "`nBuilt $(Join-Path $outDir 'Snapline.exe')"
+$builtExe = Join-Path $outDir 'Snapline.exe'
+Write-Host "Built $builtExe"
 
-# scripts\build.ps1 -Installer  also builds dist\Snapline-<version>-Setup.exe with Inno Setup
 if ($Installer) {
-    $iscc = @("$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe", "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
-    if (-not $iscc) { Write-Error "Inno Setup 6 not found"; exit 1 }
-    $portableDir = Join-Path $dist "portable"
-    if (-not (Test-Path (Join-Path $portableDir "Snapline.exe"))) { Write-Error "Build the portable exe first: scripts\build.ps1 -Portable"; exit 1 }
-    $ver = if ($Version) { $Version } else { ([xml](Get-Content $proj)).Project.PropertyGroup.Version | Select-Object -First 1 }
-    & $iscc (Join-Path $root 'installer\snapline.iss') "/DVersion=$ver" "/DSource=$portableDir" /Q
+    $iscc = @(
+        "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
+        "$([Environment]::GetEnvironmentVariable('ProgramFiles(x86)'))\Inno Setup 6\ISCC.exe"
+        "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
+    ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+    if (-not $iscc) { throw 'Inno Setup 6 not found.' }
+
+    & $iscc (Join-Path $root 'installer\snapline.iss') "/DVersion=$Version" "/DSource=$outDir" /Q
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    Write-Host "Built $(Join-Path $dist "Snapline-$ver-Setup.exe")"
+
+    $setupName = "Snapline-$Version-win-x64-Setup.exe"
+    $portableName = "Snapline-$Version-win-x64-Portable.exe"
+    $releaseDir = Join-Path $dist "release\$Version"
+    New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
+    Copy-Item -LiteralPath (Join-Path $dist $setupName) -Destination (Join-Path $releaseDir $setupName) -Force
+    Copy-Item -LiteralPath $builtExe -Destination (Join-Path $releaseDir $portableName) -Force
+
+    $checksums = foreach ($name in $setupName, $portableName) {
+        $hash = Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $releaseDir $name)
+        "$($hash.Hash.ToLowerInvariant())  $name"
+    }
+    Set-Content -LiteralPath (Join-Path $releaseDir 'SHA256SUMS.txt') -Value $checksums -Encoding ascii
+    Write-Host "Windows release files: $releaseDir"
 }

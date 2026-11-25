@@ -80,7 +80,8 @@ public static class Shell
     // MARK: Start with Windows
 
     private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    private const string RunName = "Snapline";
+    private const string RunName = "SnaplineWindows";
+    private static string StartupCommand => $"\"{ExePath()}\"";
 
     /// <summary>A Run entry left by the old name points at an exe that no longer exists; it becomes ours.</summary>
     public static void MigrateStartup()
@@ -93,15 +94,18 @@ public static class Shell
         get
         {
             using var key = Registry.CurrentUser.OpenSubKey(RunKey);
-            return key?.GetValue(RunName) is string s && s.Contains(ExePath(), StringComparison.OrdinalIgnoreCase);
+            return OwnsStartupEntry(key);
         }
         set
         {
             using var key = Registry.CurrentUser.CreateSubKey(RunKey);
-            if (value) key.SetValue(RunName, $"\"{ExePath()}\"");
-            else key.DeleteValue(RunName, false);
+            if (value) key.SetValue(RunName, StartupCommand);
+            else if (OwnsStartupEntry(key)) key.DeleteValue(RunName, false);
         }
     }
+
+    private static bool OwnsStartupEntry(RegistryKey? key)
+        => string.Equals(key?.GetValue(RunName) as string, StartupCommand, StringComparison.OrdinalIgnoreCase);
 
     public static string ExePath() => Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule!.FileName;
 }

@@ -10,7 +10,7 @@ public sealed class Settings
     // Automated tests use a separate profile; normal launches keep existing settings.
     public static string Folder { get; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        Environment.GetEnvironmentVariable("SNAPLINE_TEST_PROFILE") ?? "Snapline");
+        Environment.GetEnvironmentVariable("SNAPLINE_TEST_PROFILE") ?? "Snapline Windows");
 
     /// <summary>The app used to be called Clothesline. Its folder, settings and caught captures come along.</summary>
     private static string Migrate(string folder)

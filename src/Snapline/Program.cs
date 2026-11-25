@@ -55,7 +55,7 @@ public static class Program
             try { return Snapshot.Run(args); }
             catch (Exception e) { Core.Log.Error($"Snapshot failed: {e}"); return 1; }
         }
-        string instance=Environment.GetEnvironmentVariable("SNAPLINE_TEST_PROFILE") is null ? "Snapline" : "SnaplineSessionTest";
+        string instance=Environment.GetEnvironmentVariable("SNAPLINE_TEST_PROFILE") is null ? "SnaplineWindows" : "SnaplineSessionTest";
         using var mutex = new Mutex(true, $@"Local\{instance}.SingleInstance", out bool first);
         var signal = new EventWaitHandle(false, EventResetMode.AutoReset, $@"Local\{instance}.Toggle");
         if (!first)
