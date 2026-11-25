@@ -65,8 +65,9 @@ jobs:
           Write-Host "Passed $($report.Checks.Count) synthetic behavior checks."
 
           $markup = Join-Path $dir 'markup.png'
+          Copy-Item -LiteralPath (Join-Path $dir 'managed-capture.png') -Destination $markup
           Invoke-Diagnostic @('--markup-test', ('"{0}"' -f $markup))
-          Write-Host 'Markup and original-image restore self-test passed.'
+          Write-Host 'Markup save, undo, and image dimensions self-test passed.'
 
           $shelf = Join-Path $dir 'shelf.png'
           $samples = @('document.png','dashboard.png','text.png') | ForEach-Object {
