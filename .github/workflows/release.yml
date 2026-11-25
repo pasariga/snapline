@@ -61,13 +61,25 @@ jobs:
             ('/DIR="{0}"' -f $testDir), ('/LOG="{0}"' -f $installLog)
           ) -PassThru -Wait
           if (Test-Path -LiteralPath $installLog) {
-            Select-String -LiteralPath $installLog -Pattern 'Command line|HKEY_CURRENT_USER|SnaplineWindows|registry entry|Additional tasks|Startup|completed successfully'
+            Select-String -LiteralPath $installLog -Pattern 'Value name: SnaplineWindows' -Context 1,4 | ForEach-Object { $_.ToString() }
           }
           if ($install.ExitCode -ne 0) { throw "Installer exited with $($install.ExitCode)" }
 
           $installed = Join-Path $testDir 'Snapline.exe'
-          if ((Get-ItemPropertyValue -Path $runKey -Name 'SnaplineWindows' -ErrorAction SilentlyContinue) -ne ('"{0}"' -f $installed) -or
-              (Get-ItemPropertyValue -Path $runKey -Name 'Snapline') -ne $legacyCommand) {
+          function Read-StartupValue([string] $Name, [Microsoft.Win32.RegistryView] $View) {
+            $hive = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::CurrentUser, $View)
+            try {
+              $key = $hive.OpenSubKey('Software\Microsoft\Windows\CurrentVersion\Run')
+              if ($null -eq $key) { return }
+              try { return $key.GetValue($Name) } finally { $key.Dispose() }
+            } finally { $hive.Dispose() }
+          }
+
+          $startup64 = Read-StartupValue 'SnaplineWindows' Registry64
+          $startup32 = Read-StartupValue 'SnaplineWindows' Registry32
+          Write-Host "Startup entry found in 64-bit view: $($null -ne $startup64); 32-bit view: $($null -ne $startup32)"
+          if ($startup64 -ne ('"{0}"' -f $installed) -or
+              (Read-StartupValue 'Snapline' Registry64) -ne $legacyCommand) {
             throw 'Installer did not isolate the Windows edition startup entry.'
           }
           $releaseKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{A18943D2-808C-47D6-8F51-299925DCE31C}_is1'
@@ -123,8 +135,8 @@ jobs:
           if ($uninstall.ExitCode -ne 0 -or (Test-Path -LiteralPath $installed)) {
             throw "Uninstall failed with code $($uninstall.ExitCode)"
           }
-          if ((Get-ItemPropertyValue -Path $runKey -Name 'SnaplineWindows' -ErrorAction SilentlyContinue) -or
-              (Get-ItemPropertyValue -Path $runKey -Name 'Snapline') -ne $legacyCommand -or
+          if ((Read-StartupValue 'SnaplineWindows' Registry64) -or
+              (Read-StartupValue 'Snapline' Registry64) -ne $legacyCommand -or
               (Get-FileHash -LiteralPath $savedCapture).Hash -ne $captureHash) {
             throw 'Uninstall failed to remove only its own startup entry or preserve the saved capture.'
           }

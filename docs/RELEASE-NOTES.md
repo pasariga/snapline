@@ -7,7 +7,7 @@ First Windows x64 release candidate for pasariga’s independently maintained Sn
 - Screenshots fly into the shelf using the Windows compositor where available. Animation previews leave the original image intact.
 - Auto-hide waits while you drag a card, edit, or use a menu. The delay defaults to 2.5 seconds and can be changed in Settings.
 - Ordinary maximized windows and borderless fullscreen apps are handled separately.
-- The Windows edition defaults to **Ctrl+Alt+Shift+T**, leaving the legacy default **Ctrl+Alt+T** available. An existing custom shortcut stays as configured. Enable clipboard capture in one edition when running both.
+- The Windows edition defaults to **Ctrl+Alt+Shift+T**, leaving the legacy default **Ctrl+Alt+T** available. An existing custom shortcut stays as configured. Shared clipboard and watch folders can still produce duplicate cards if both are running.
 - The installer uses its own Windows edition identity, install path, profile, and sign-in entry. Existing Snapline data is kept in its original directory.
 
 | File | Use |
@@ -27,7 +27,7 @@ Save important screenshots and notes outside the managed folder. The shelf reset
 - 截图飞入晾衣杆时会优先使用 Windows 合成器，预览动画保留原图。
 - 拖拽、编辑、使用菜单期间暂停自动收起。默认延迟 2.5 秒，可在设置里调整。
 - 区分普通最大化窗口和无边框全屏应用。
-- Windows 修改版默认使用 **Ctrl+Alt+Shift+T**，旧版默认的 **Ctrl+Alt+T** 可继续使用。已设置的自定义快捷键继续生效。同时运行两版时，只在一个版本中打开剪贴板截图接收。
+- Windows 修改版默认使用 **Ctrl+Alt+Shift+T**，旧版默认的 **Ctrl+Alt+T** 可继续使用。已设置的自定义快捷键继续生效。两版同时运行时，公共剪贴板和监视目录仍可能导致重复收图。
 - 安装版使用独立的安装标识、目录、配置和开机启动项，已有 Snapline 数据留在原目录。
 
 | 文件 | 用途 |

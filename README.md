@@ -54,7 +54,7 @@ Capture handling and OCR run locally. The app requires no account or API key. Se
 | --- | --- |
 | Why didn’t my screenshot appear? | Check **Catch clipboard captures** in Settings, or add your capture tool’s save folder to the watch list. Use the tray icon or **Ctrl+Alt+Shift+T** if top-edge reveal is off. |
 | Does the animation reduce screenshot quality? | Animation uses a separate preview. Copy and open use the source image, and annotation can restore the original. |
-| Can I keep my existing Snapline installation? | Yes. This edition has its own install entry and data folder. Existing settings are left in their original folder. The Windows edition defaults to **Ctrl+Alt+Shift+T**. If you tested the earlier candidate, set that shortcut in Settings before running both editions. Keep clipboard capture enabled in just one edition to avoid duplicate cards. |
+| Can I keep my existing Snapline installation? | Yes. This edition has its own install entry and data folder. Existing settings are left in their original folder. The Windows edition defaults to **Ctrl+Alt+Shift+T**. If you tested the earlier candidate, set that shortcut in Settings before running both editions. Both editions can still catch the same clipboard image or file in a shared watch folder. Run one at a time for everyday capture. |
 | Is the interface available in Chinese? | The repository docs are bilingual. The app currently offers English and Arabic. |
 | What about macOS? | The repository retains upstream macOS source. This edition prepares Windows x64 packages. |
 
