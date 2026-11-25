@@ -1,0 +1,183 @@
+name: Validate Windows release draft
+on:
+  push:
+    branches: [prepare-windows-draft]
+
+permissions:
+  contents: read
+
+env:
+  SOURCE_SHA: f7ee98d3f3f9c79cc965642a3bb077318b4f5b26
+  PACKAGE_RUN: '45564015702'
+  RELEASE_VERSION: 1.6.2-windows.1
+
+jobs:
+  verify:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: Snapline-Windows-x64
+          run-id: ${{ env.PACKAGE_RUN }}
+          github-token: ${{ github.token }}
+          path: candidate
+      - name: Verify candidate and run existing diagnostics
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'snapline-diagnostics'
+          New-Item -ItemType Directory -Path $dir -Force | Out-Null
+          $env:SNAPLINE_TEST_PROFILE = Join-Path $dir 'profile'
+          $sumFile = Get-ChildItem -Path candidate -Filter SHA256SUMS.txt -Recurse -File
+          $exe = Join-Path $sumFile.DirectoryName "Snapline-$env:RELEASE_VERSION-win-x64-Portable.exe"
+          $names = @("Snapline-$env:RELEASE_VERSION-win-x64-Portable.exe", "Snapline-$env:RELEASE_VERSION-win-x64-Setup.exe")
+          $sums = @(Get-Content -LiteralPath $sumFile.FullName)
+          if ($sums.Count -ne 2) { throw 'Expected two checksum records.' }
+          foreach ($entry in $sums) {
+            $expected, $name = $entry -split '  ', 2
+            if ($name -cnotin $names) { throw "Unexpected package: $name" }
+            $file = Get-Item -LiteralPath (Join-Path $sumFile.DirectoryName $name)
+            if ((Get-FileHash -LiteralPath $file.FullName).Hash -ne $expected) { throw "Hash mismatch: $name" }
+            $signature = (Get-AuthenticodeSignature -LiteralPath $file.FullName).Status
+            Write-Host "$name $($file.Length) bytes SHA256=$expected Authenticode=$signature"
+          }
+
+          function Invoke-Diagnostic([string[]] $Arguments) {
+            $proc = Start-Process -FilePath $exe -ArgumentList $Arguments -PassThru
+            if (!$proc.WaitForExit(90000)) {
+              Stop-Process -Id $proc.Id
+              throw "Timed out running $($Arguments[0])"
+            }
+            if ($proc.ExitCode -ne 0) { throw "$($Arguments[0]) returned $($proc.ExitCode)" }
+          }
+
+          $behavior = Join-Path $dir 'behavior.json'
+          Invoke-Diagnostic @('--session-selftest', ('"{0}"' -f $behavior))
+          $report = Get-Content -LiteralPath $behavior -Raw | ConvertFrom-Json
+          if (!$report.Passed -or $report.Checks.Count -lt 20) { throw 'Behavior diagnostic failed.' }
+          Write-Host "Passed $($report.Checks.Count) synthetic behavior checks."
+
+          $markup = Join-Path $dir 'markup.png'
+          Invoke-Diagnostic @('--markup-test', ('"{0}"' -f $markup))
+          Write-Host 'Markup and original-image restore self-test passed.'
+
+          $shelf = Join-Path $dir 'shelf.png'
+          $samples = @('document.png','dashboard.png','text.png') | ForEach-Object {
+            '"{0}"' -f (Join-Path $PWD "docs\samples\$_")
+          }
+          Invoke-Diagnostic (@('--snapshot', ('"{0}"' -f $shelf), '--width', '1120') + $samples)
+
+      - name: Compose share card from the rendered Windows shelf
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          $dir = Join-Path $env:RUNNER_TEMP 'snapline-diagnostics'
+          $shelf = [Drawing.Image]::FromFile((Join-Path $dir 'shelf.png'))
+          $logo = [Drawing.Image]::FromFile((Join-Path $PWD 'docs\logo-512.png'))
+          $output = Join-Path $dir 'social-windows.jpg'
+          $canvas = [Drawing.Bitmap]::new(1280, 640)
+          $graphics = [Drawing.Graphics]::FromImage($canvas)
+          $graphics.InterpolationMode = 'HighQualityBicubic'
+          $graphics.TextRenderingHint = 'AntiAliasGridFit'
+
+          function New-Color([string] $Hex) {
+            [Drawing.ColorTranslator]::FromHtml($Hex)
+          }
+          function New-Brush([string] $Hex) {
+            [Drawing.SolidBrush]::new((New-Color $Hex))
+          }
+          function New-Font([single] $Size, [Drawing.FontStyle] $Weight) {
+            [Drawing.Font]::new('Segoe UI', $Size, $Weight, [Drawing.GraphicsUnit]::Pixel)
+          }
+
+          $gradient = [Drawing.Drawing2D.LinearGradientBrush]::new(
+            [Drawing.Rectangle]::new(0,0,1280,640), (New-Color '#101A33'), (New-Color '#202B49'), [single]32)
+          $graphics.FillRectangle($gradient, 0, 0, 1280, 640)
+          $white = New-Brush '#F3F6FF'
+          $soft = New-Brush '#B7C6E7'
+          $accent = New-Brush '#9AB9FF'
+          $graphics.DrawImage($logo, 82, 52, 62, 62)
+          $graphics.DrawString('Snapline', (New-Font 42 Bold), $white, 153, 54)
+          $graphics.DrawString('A screenshot shelf for Windows', (New-Font 58 Bold), $white, 75, 144)
+          $graphics.DrawString('Capture it. Find it at the top. Drag it where you need it.',
+            (New-Font 27 Regular), $soft, 80, 227)
+          $width = 1120
+          $height = [int]($shelf.Height * $width / $shelf.Width)
+          $graphics.FillRectangle((New-Brush '#50639A'), 78, 308, ($width + 4), ($height + 4))
+          $graphics.DrawImage($shelf, 80, 310, $width, $height)
+          $graphics.DrawString('WINDOWS EDITION BY PASARIGA', (New-Font 18 Bold), $accent, 80, 583)
+          $jpeg = [Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() |
+            Where-Object MimeType -eq 'image/jpeg' | Select-Object -First 1
+          $options = [Drawing.Imaging.EncoderParameters]::new(1)
+          $options.Param[0] = [Drawing.Imaging.EncoderParameter]::new([Drawing.Imaging.Encoder]::Quality,[long]83)
+          $canvas.Save($output, $jpeg, $options)
+          $graphicShelf = [Drawing.Bitmap]::new($shelf, 1120, $height)
+          $standalone = Join-Path $dir 'windows-shelf.jpg'
+          $graphicShelf.Save($standalone, $jpeg, $options)
+          $graphicShelf.Dispose()
+          $graphics.Dispose()
+          $canvas.Dispose()
+          $shelf.Dispose()
+          $logo.Dispose()
+
+          foreach ($file in $output, $standalone) {
+            $encoded = [Convert]::ToBase64String([IO.File]::ReadAllBytes($file))
+            $name = [IO.Path]::GetFileNameWithoutExtension($file)
+            Write-Host "::group::$name"
+            foreach ($line in [regex]::Matches($encoded, '.{1,1024}')) {
+              Write-Host ("PREVIEW {0} {1}" -f $name, $line.Value)
+            }
+            Write-Host '::endgroup::'
+          }
+
+  draft:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.repository == 'pasariga/snapline' && github.ref == 'refs/heads/prepare-windows-draft'
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: Snapline-Windows-x64
+          run-id: ${{ env.PACKAGE_RUN }}
+          github-token: ${{ github.token }}
+          path: candidate
+      - name: Save verified packages in an unpublished draft
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          checksums=$(find candidate -type f -name SHA256SUMS.txt)
+          cd "$(dirname "$checksums")"
+          sed 's/\r$//' SHA256SUMS.txt | sha256sum --strict -c -
+          setup="Snapline-$RELEASE_VERSION-win-x64-Setup.exe"
+          portable="Snapline-$RELEASE_VERSION-win-x64-Portable.exe"
+          test -s "$setup" && test -s "$portable"
+          notes="$RUNNER_TEMP/snapline-release-notes.md"
+          cp "$GITHUB_WORKSPACE/docs/RELEASE-NOTES.md" "$notes"
+          cat >> "$notes" <<'DRAFT_NOTE'
+
+          **Draft acceptance / 草稿验收**  
+          Final desktop capture, drag-and-drop, and recording checks are pending.  
+          实际桌面截图、拖放和录屏验收待完成。
+          DRAFT_NOTE
+          gh release create "v$RELEASE_VERSION" "$setup" "$portable" SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY" --target "$SOURCE_SHA" --draft --prerelease --latest=false \
+            --title "Snapline Windows $RELEASE_VERSION" --notes-file "$notes"
+          gh release view "v$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" \
+            --json isDraft,isPrerelease,assets,url,tagName,targetCommitish
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/v$RELEASE_VERSION" --jq length)" -eq 0
